@@ -19,6 +19,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <javafx.version>21.0.2</javafx.version>
         <gson.version>2.10.1</gson.version>
+        <jda.version>5.2.1</jda.version>
     </properties>
 
     <dependencies>
@@ -40,6 +41,27 @@
             <artifactId>gson</artifactId>
             <version>${gson.version}</version>
         </dependency>
+
+        <!-- Discord JDA -->
+        <dependency>
+            <groupId>net.dv8tion</groupId>
+            <artifactId>JDA</artifactId>
+            <version>${jda.version}</version>
+            <exclusions>
+                <!-- exclude opus audio (not needed for bots) -->
+                <exclusion>
+                    <groupId>club.minnced</groupId>
+                    <artifactId>opus-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- SLF4J for JDA logging -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.5.6</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -57,14 +79,32 @@
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.5.2</version>
                 <executions>
+                    <!-- Fat-jar for the JavaFX desktop app -->
                     <execution>
+                        <id>shade-ui</id>
                         <phase>package</phase>
                         <goals><goal>shade</goal></goals>
                         <configuration>
+                            <outputFile>${project.build.directory}/salasff-ui.jar</outputFile>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.salasff.ui.MainApp</mainClass>
                                 </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                    <!-- Fat-jar for the Discord bot -->
+                    <execution>
+                        <id>shade-bot</id>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <outputFile>${project.build.directory}/salasff-bot.jar</outputFile>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.salasff.bot.DiscordBot</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                         </configuration>
                     </execution>
