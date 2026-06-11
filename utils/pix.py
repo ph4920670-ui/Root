@@ -165,7 +165,12 @@ def _mistic_criar_cobranca(valor_total: float, descricao: str, ci: str, cs: str,
     r = requests.post(f"{MISTIC_BASE_URL}/transactions/create", headers=h, json=body, timeout=15)
     if not r.ok:
         _log.error(f"[MISTIC CREATE] {r.status_code} — {r.text[:500]}")
-        r.raise_for_status()
+        try:
+            err = r.json()
+            msg = err.get("message") or err.get("error") or err.get("msg") or r.text[:300]
+        except Exception:
+            msg = r.text[:300]
+        raise Exception(f"MisticPay {r.status_code}: {msg}")
     data = r.json().get("data", {})
     return {
         "txid":       str(data.get("transactionId", tx_id)),
