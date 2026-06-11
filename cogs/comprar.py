@@ -1,4 +1,4 @@
-# cogs/comprar.py — Sistema de compra PIX (v3)
+# cogs/comprar.py — Sistema de compra PIX (v3 + org integration)
 
 import asyncio, io, base64
 import discord
@@ -315,29 +315,6 @@ class ComprarCog(commands.Cog):
             f"{pix.get('nome')} (id={pix.get('id')})"
         )
 
-        # ── Exemplo de plug-in (descomente e adapte ao seu fluxo) ──
-        #
-        # try:
-        #     valor_str = str(pix.get("valor", "")).replace(",", ".")
-        #     valor = float(valor_str)
-        #     nome  = (pix.get("nome") or "").strip().lower()
-        #
-        #     # 1) Casa com pedido pendente por valor exato + nome similar:
-        #     pend = pedidos_pendentes()
-        #     for p in pend:
-        #         if abs(float(p.get("valor", 0)) - valor) < 0.01:
-        #             nome_p = (p.get("pagador_nome") or "").strip().lower()
-        #             if nome and nome_p and nome in nome_p or nome_p in nome:
-        #                 await self._aprovar(p)
-        #                 _log_site.info(f"[pix_site] aprovou pedido {p.get('id')}")
-        #                 return
-        #
-        #     # 2) Ou guarda em cache pra ser usado por comando "pg Nome"
-        #     #    no Discord (fluxo da fila de salas FF).
-        #     #    Implementa aqui o registro no cache de PIX pendentes.
-        # except Exception as e:
-        #     _log_site.error(f"[pix_site] erro no listener: {e}")
-
     @tasks.loop(seconds=5, reconnect=True)
     async def verificar_pagamentos(self):
         try:
@@ -403,7 +380,6 @@ class ComprarCog(commands.Cog):
                             em = discord.Embed(
                                 title=f"{ON}  Salas Compradas!",
                                 color=0x00FF7F,
-                                
                             )
                             em.description = (
                                 f"**{p['quantia']} sala(s)** foram adicionadas ao servidor!\n"
@@ -441,6 +417,14 @@ class ComprarCog(commands.Cog):
                 import logging as _lg_lucro
                 _lg_lucro.getLogger("salasff.lucroorg").warning(f"[lucro-org] erro: {_ex_lucro}")
 
+            # ── INTEGRAÇÃO ORG: registrar venda da org de revenda (compra de saldo do servidor) ──
+            try:
+                from utils.database_orgs import org_registrar_venda as _org_venda
+                await asyncio.to_thread(_org_venda, guild_id, float(p["valor"]), int(p["quantia"]))
+            except Exception as _ex_org:
+                import logging as _lg_org
+                _lg_org.getLogger("salasff.org").warning(f"[org-venda-guild] erro: {_ex_org}")
+
             # Envia log no canal configurado pelo /dev > Logs de Compras
             try:
                 from utils.database import guild_config_get as _gcg
@@ -452,7 +436,6 @@ class ComprarCog(commands.Cog):
                         em_log = discord.Embed(
                             title=f"{ON}  Nova Compra — {guild.name if guild else guild_id}",
                             color=0x00FF7F,
-                            
                         )
                         em_log.add_field(name=f"{CART}  Salas Compradas", value=f"> **{p['quantia']}**", inline=True)
                         em_log.add_field(name=f"{MONEY}  Valor Pago",     value=f"> **R$ {p['valor']:.2f}**", inline=True)
@@ -535,7 +518,6 @@ class ComprarCog(commands.Cog):
             em = discord.Embed(
                 title=f"{ON}  Pagamento Confirmado!",
                 color=0x00FF7F,
-                
             )
             em.description = (
                 f"Olá **{p['user_nome']}**! Seu pagamento foi aprovado.\n"
@@ -614,6 +596,16 @@ class ComprarCog(commands.Cog):
         except Exception as _ex_lucro:
             import logging as _lg_lucro
             _lg_lucro.getLogger("salasff.lucroorg").warning(f"[lucro-org-pessoal] erro: {_ex_lucro}")
+
+        # ── INTEGRAÇÃO ORG: registrar venda da org de revenda (compra pessoal dentro de org) ──
+        try:
+            pedido_guild_id = p.get("guild_id")
+            if pedido_guild_id:
+                from utils.database_orgs import org_registrar_venda as _org_venda2
+                await asyncio.to_thread(_org_venda2, pedido_guild_id, float(p["valor"]), int(p["quantia"]))
+        except Exception as _ex_org2:
+            import logging as _lg_org2
+            _lg_org2.getLogger("salasff.org").warning(f"[org-venda-pessoal] erro: {_ex_org2}")
 
         await self._backup("pós-compra")
 
@@ -743,6 +735,7 @@ class PainelGratisView(discord.ui.View):
             row=0,
         ))
         await inter.followup.send(embed=em, view=view, ephemeral=True)
+
     @app_commands.guilds(*_ADMIN_GUILDS)
     @app_commands.command(name="simular", description="[ADMIN] Simula compra com botão de aprovar.")
     @app_commands.guilds(*[discord.Object(id=g) for g in config.OWNER_GUILD_IDS])
