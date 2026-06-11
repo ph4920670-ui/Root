@@ -55,6 +55,17 @@ class ComprarModal(discord.ui.Modal, title="🛒 Comprar Salas"):
         gid = self.guild_id or (str(i.guild.id) if i.guild else None)
         preco = get_preco_por_sala_guild(gid)
         valor = round(qtd * preco, 2)
+
+        from utils.pix import MISTIC_VALOR_MINIMO, get_banco_ativo as _get_banco
+        _banco_check = _get_banco(qtd)
+        if _banco_check != "efi" and valor < MISTIC_VALOR_MINIMO:
+            import math
+            min_qtd = math.ceil(MISTIC_VALOR_MINIMO / preco)
+            return await i.followup.send(embed=_err(
+                "Valor mínimo não atingido",
+                f"{DOT} O valor mínimo para compra é **R$ {MISTIC_VALOR_MINIMO:.2f}**.\n"
+                f"{DOT} Compre pelo menos **{min_qtd} salas** (R$ {round(min_qtd * preco, 2):.2f})."
+            ), ephemeral=True)
         try: pix = criar_cobranca_pix(valor, f"{qtd} salas SalasFF", quantidade=qtd)
         except Exception as ex:
             return await i.followup.send(embed=_err(f"Erro PIX: {ex}"), ephemeral=True)

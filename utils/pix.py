@@ -153,8 +153,12 @@ def _efi_consultar(txid: str) -> dict:
 def _mistic_headers(ci: str, cs: str) -> dict:
     return {"ci": ci, "cs": cs, "Content-Type": "application/json"}
 
+MISTIC_VALOR_MINIMO = 1.50
+
 def _mistic_criar_cobranca(valor_total: float, descricao: str, ci: str, cs: str, expiracao: int = 3600) -> dict:
     import requests, uuid
+    if valor_total < MISTIC_VALOR_MINIMO:
+        raise Exception(f"Valor mínimo para compra via PIX: R$ {MISTIC_VALOR_MINIMO:.2f}")
     h = _mistic_headers(ci, cs)
     tx_id = str(uuid.uuid4()).replace("-", "")[:20]
     body = {
