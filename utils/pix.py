@@ -159,6 +159,8 @@ def _mistic_criar_cobranca(valor_total: float, descricao: str, ci: str, cs: str,
     tx_id = str(uuid.uuid4()).replace("-", "")[:20]
     body = {
         "amount": round(valor_total, 2),
+        "payerName": "SalasFF",
+        "payerDocument": "52998224725",
         "transactionId": tx_id,
         "description": descricao[:140],
     }
