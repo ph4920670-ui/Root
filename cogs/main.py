@@ -3563,6 +3563,9 @@ class MainCog(commands.Cog):
         em.description = f"{DOT} Escolha o modo da sala:"
         await ctx.send(embed=em, view=C3ModoView())
 
+    @commands.command(name="painel")
+    async def prefix_painel(self, ctx): await self.prefix_c(ctx)
+
     @commands.command(name="cs")
     async def prefix_cs(self, ctx):
         uid = ctx.author.id
