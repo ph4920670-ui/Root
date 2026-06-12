@@ -17,3 +17,8 @@ bin-release/
 # should NOT be excluded as they contain compiler settings and other important
 # information for Eclipse / Flash Builder.
 .claude/worktrees/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
