@@ -3,6 +3,30 @@
 
 import os
 
+
+def _load_dotenv():
+    """Carrega .env da raiz do projeto pra os.environ (sem sobrescrever o que já existe).
+    Permite rodar na Discloud apenas subindo o .env, sem mexer no painel."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except Exception:
+        pass
+
+
+_load_dotenv()
+
 # ── Discord ────────────────────────────────────────────────────────────────
 DISCORD_TOKEN    = os.environ.get("DISCORD_TOKEN", "")
 ADMIN_IDS        = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]

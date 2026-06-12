@@ -22,3 +22,6 @@ bin-release/
 __pycache__/
 *.pyc
 *.pyo
+
+# Secrets — nunca commitar credenciais
+.env
