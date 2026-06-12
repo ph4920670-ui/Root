@@ -35,6 +35,23 @@ def get_db() -> Client:
     return _client
 
 
+def _all(table: str, columns: str = "*", **filters) -> list:
+    """Busca TODAS as linhas paginando 1000 de cada vez (evita limite default do PostgREST)."""
+    PAGE = 1000
+    rows: list = []
+    offset = 0
+    while True:
+        q = get_db().table(table).select(columns)
+        for k, v in filters.items():
+            q = q.eq(k, v)
+        batch = (q.range(offset, offset + PAGE - 1).execute().data) or []
+        rows.extend(batch)
+        if len(batch) < PAGE:
+            break
+        offset += PAGE
+    return rows
+
+
 # ══════════════════════════════════════════════════════════════
 #  COMPAT — aliases para imports antigos
 # ══════════════════════════════════════════════════════════════
@@ -396,8 +413,7 @@ def saldo_total_usuario(user_id, user_nome=None):
 def usuarios_com_saldo() -> list:
     """Retorna lista única de user_ids com saldo > 0."""
     try:
-        res = get_db().table("keys").select("dono_id,quantia,salas_usadas").execute()
-        keys = res.data or []
+        keys = _all("keys", "dono_id,quantia,salas_usadas")
         ativos = set()
         for k in keys:
             dono = k.get("dono_id")
@@ -466,8 +482,7 @@ def _sincronizar_pendentes(user_id, user_nome):
     """Sincroniza keys com dono PENDENTE_ para o user_id real."""
     try:
         nome_lower = user_nome.lower().strip()
-        res = get_db().table("keys").select("id,dono_id,dono_nome").execute()
-        keys = res.data or []
+        keys = _all("keys", "id,dono_id,dono_nome")
         for k in keys:
             dono = k.get("dono_id") or ""
             if not dono.startswith("PENDENTE_"):
@@ -496,8 +511,7 @@ def keys_do_usuario(user_id, user_nome=None):
 
 def todas_keys_com_saldo():
     try:
-        res = get_db().table("keys").select("*").execute()
-        keys = res.data or []
+        keys = _all("keys")
         return sorted(
             [k for k in keys if k.get("dono_id") and k["salas_usadas"] < k["quantia"]],
             key=lambda k: (k.get("dono_nome") or "").lower()
@@ -840,8 +854,7 @@ def lucro_resumo(user_id: str = None) -> dict:
 
     # Bônus dado: keys com criado_por começando em "EVENTO_" + bonus_resgatado total
     try:
-        res_keys = get_db().table("keys").select("quantia,criado_por,criado_em").execute()
-        all_keys = res_keys.data or []
+        all_keys = _all("keys", "quantia,criado_por,criado_em")
     except Exception:
         all_keys = []
 
@@ -909,8 +922,7 @@ def lucro_periodo():
     d7     = (agora - timedelta(days=7)).isoformat()
 
     try:
-        res_salas = get_db().table("salas").select("criado_em").execute()
-        todas = res_salas.data or []
+        todas = _all("salas", "criado_em")
         c_hoje = sum(1 for s in todas if (s["criado_em"] or "") >= hoje)
         c3d    = sum(1 for s in todas if (s["criado_em"] or "") >= d3)
         c7d    = sum(1 for s in todas if (s["criado_em"] or "") >= d7)
@@ -949,11 +961,8 @@ def stats_globais():
     d7   = (agora - timedelta(days=7)).isoformat()
 
     try:
-        res_salas = get_db().table("salas").select("criado_em").execute()
-        salas = res_salas.data or []
-
-        res_ped = get_db().table("pedidos_pix").select("quantia,valor,pago_em").eq("status", "pago").execute()
-        pagos = res_ped.data or []
+        salas = _all("salas", "criado_em")
+        pagos = _all("pedidos_pix", "quantia,valor,pago_em", status="pago")
 
         return {
             "salas_hoje":   sum(1 for s in salas if (s["criado_em"] or "") >= desde_hoje),
