@@ -62,6 +62,17 @@ def create_bot() -> commands.Bot:
             init_db()
         except Exception as e:
             _log.error(f"[Bot] init_db erro: {e}")
+        # Salva o Client ID (= application id) no botconfig para o site usar no OAuth2
+        try:
+            from utils.database import botconfig_load, botconfig_save
+            app_id = str(bot.application_id or bot.user.id)
+            cfg = botconfig_load()
+            if cfg.get("oauth2_client_id") != app_id:
+                cfg["oauth2_client_id"] = app_id
+                botconfig_save(cfg)
+                _log.info(f"[Bot] oauth2_client_id salvo no botconfig: {app_id}")
+        except Exception as e:
+            _log.error(f"[Bot] salvar client_id erro: {e}")
 
     async def setup_hook_impl():
         for cog in COGS:

@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Request, HTTPException
 
 from site.config import (
-    DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET,
-    OAUTH2_REDIRECT, DISCORD_API, ADMIN_DISCORD_ID,
+    DISCORD_API,
+    get_client_id, get_client_secret, get_redirect, get_admin_id,
 )
 
 _log = logging.getLogger("salasff.site.auth")
@@ -118,15 +118,16 @@ def require_session(request: Request) -> dict:
 
 
 def is_admin(user_id: str) -> bool:
-    return str(user_id) == str(ADMIN_DISCORD_ID)
+    return str(user_id) == str(get_admin_id())
 
 
 # ── Discord OAuth2 ────────────────────────────────────────────────────────
 
 def get_oauth_url(state: str = "") -> str:
+    from urllib.parse import quote
     params = (
-        f"client_id={DISCORD_CLIENT_ID}"
-        f"&redirect_uri={OAUTH2_REDIRECT}"
+        f"client_id={get_client_id()}"
+        f"&redirect_uri={quote(get_redirect(), safe='')}"
         f"&response_type=code"
         f"&scope=identify"
         + (f"&state={state}" if state else "")
@@ -139,11 +140,11 @@ async def exchange_code(code: str) -> dict:
         r = await client.post(
             f"{DISCORD_API}/oauth2/token",
             data={
-                "client_id": DISCORD_CLIENT_ID,
-                "client_secret": DISCORD_CLIENT_SECRET,
+                "client_id": get_client_id(),
+                "client_secret": get_client_secret(),
                 "grant_type": "authorization_code",
                 "code": code,
-                "redirect_uri": OAUTH2_REDIRECT,
+                "redirect_uri": get_redirect(),
             },
         )
         r.raise_for_status()
