@@ -4650,37 +4650,47 @@ class SalaV2Cog(commands.Cog):
 
         # ── .cs modo selector ────────────────────────────────────────────────
         if cid.startswith("cs:modo:"):
-            parts = cid.split(":")  # cs : modo : author_id : modo_num
-            if len(parts) < 4:
-                return
-            author_id_str, modo_str = parts[2], parts[3]
-            if str(inter.user.id) != author_id_str:
-                return await inter.response.send_message("Esse menu não é seu.", ephemeral=True)
-            modo_num = int(modo_str)
-            if modo_num == 3:
-                # Outros Modos — abre sub-menu ephemeral
-                em = _emb(f"{TOP}  Outros Modos")
-                em.description = f"{DOT} Escolha o modo:"
-                return await inter.response.send_message(embed=em, view=C3ModoView(), ephemeral=True)
-            # Normal (1) ou Infinito (2) — cria com resultado público no canal
-            if not await _safe_defer(inter, ephemeral=True):
-                return
-            uid = str(inter.user.id)
-            k, guild_pagou, gid = await _reservar_sala(inter, modo_num, uid, inter.user.display_name)
-            if not guild_pagou and not k:
-                return await inter.followup.send(
-                    embed=_err("Sem saldo", f"Sem saldo disponível.\nUse **Comprar Salas** no `/c` para adquirir."),
-                    ephemeral=True,
+            try:
+                parts = cid.split(":")  # cs : modo : author_id : modo_num
+                if len(parts) < 4:
+                    return
+                author_id_str, modo_str = parts[2], parts[3]
+                if str(inter.user.id) != author_id_str:
+                    return await inter.response.send_message("Esse menu não é seu.", ephemeral=True)
+                modo_num = int(modo_str)
+                if modo_num == 3:
+                    em = _emb(f"{TOP}  Outros Modos")
+                    em.description = f"{DOT} Escolha o modo:"
+                    return await inter.response.send_message(embed=em, view=C3ModoView(), ephemeral=True)
+                # Normal (1) ou Infinito (2)
+                if not await _safe_defer(inter, ephemeral=True):
+                    return
+                uid = str(inter.user.id)
+                k, guild_pagou, gid = await _reservar_sala(inter, modo_num, uid, inter.user.display_name)
+                if not guild_pagou and not k:
+                    return await inter.followup.send(
+                        embed=_err("Sem saldo", "Sem saldo disponível.\nUse **Comprar Salas** no `/c` para adquirir."),
+                        ephemeral=True,
+                    )
+                go = await asyncio.to_thread(go_config_get, uid)
+                if go <= 0:
+                    go = config.DEFAULT_INICIAR_MINUTOS
+                await _criar_sala_flow(
+                    inter, modo_num, go,
+                    key_row=k, key_ja_consumida=True,
+                    guild_pagou=guild_pagou, guild_id=gid,
+                    public_channel_id=inter.channel_id,
                 )
-            go = await asyncio.to_thread(go_config_get, uid)
-            if go <= 0:
-                go = config.DEFAULT_INICIAR_MINUTOS
-            await _criar_sala_flow(
-                inter, modo_num, go,
-                key_row=k, key_ja_consumida=True,
-                guild_pagou=guild_pagou, guild_id=gid,
-                public_channel_id=inter.channel_id,
-            )
+            except Exception as _cs_ex:
+                _log.error(f"[cs:modo] {_cs_ex}", exc_info=True)
+                try:
+                    _em_err = _err("Erro", f"`{_cs_ex}`")
+                    if inter.response.is_done():
+                        await inter.followup.send(embed=_em_err, ephemeral=True)
+                    else:
+                        await inter.response.send_message(embed=_em_err, ephemeral=True)
+                except Exception:
+                    pass
             return
 
         if not cid.startswith("sv2:"): return
