@@ -427,7 +427,7 @@ class SalaPublicaView(discord.ui.View):
 #  Fluxo de criação de sala (instantâneo)
 # ═══════════════════════════════════════════
 
-async def _criar_sala_flow(ctx, modo, go, key_row=None, *, is_prefix=False, key_ja_consumida=False, guild_pagou=False, guild_id=None):
+async def _criar_sala_flow(ctx, modo, go, key_row=None, *, is_prefix=False, key_ja_consumida=False, guild_pagou=False, guild_id=None, public_channel_id=None):
     m = modo_info(modo); salaid = m.get("salaid","")
     if not salaid:
         em = _err("Modo inválido.")
@@ -677,6 +677,27 @@ async def _criar_sala_flow(ctx, modo, go, key_row=None, *, is_prefix=False, key_
         from utils.api import api as _api
         api_nome = "API 1 — F" if _api._is_api1() else "API 2 — B"
         asyncio.create_task(_logs.log_sala_criada(author, m["nome"], pid, sala, go, guild, api_nome))
+        # Mensagem pública no canal (usada pelo .cs)
+        if public_channel_id:
+            try:
+                go_str = f"{go}" if go else "5"
+                _txt_pub = (
+                    f"## <:za_houst1:1483205696077037821> SALA CRIADA\n"
+                    f"**ID** {e('seta')} `{sid_s}`\n"
+                    f"**Senha** {e('seta')} `{sen}`\n"
+                    f"-# ⏱️ GO em {go_str} min · {author.mention}"
+                )
+                _ch_url = f"https://discord.com/api/v10/channels/{public_channel_id}/messages"
+                _hdrs = {"Authorization": f"Bot {config.DISCORD_TOKEN}", "Content-Type": "application/json"}
+                async with _aiohttp_v2.ClientSession() as _s:
+                    await _s.post(_ch_url, headers=_hdrs, json={
+                        "flags": 32768,
+                        "components": [{"id": 1, "type": 17, "accent_color": 0x00FF7F, "components": [
+                            {"id": 2, "type": 10, "content": _txt_pub},
+                        ]}],
+                    })
+            except Exception as _ex:
+                _log.warning(f"[cs public msg] {_ex}")
         # Imagem desativada
         # try:
         #     img_api = await api.imagem_sala(pid)
@@ -3536,38 +3557,22 @@ class MainCog(commands.Cog):
 
     @commands.command(name="cs")
     async def prefix_cs(self, ctx):
-        em = _emb("Criar Sala")
-        em.description = (
-            f"{DOT} Selecione o modo da sala que deseja criar:"
-        )
-        await ctx.send(embed=em, view=CsSelectorView(ctx.author.id))
+        uid = ctx.author.id
+        _ch_url = f"https://discord.com/api/v10/channels/{ctx.channel.id}/messages"
+        _hdrs = {"Authorization": f"Bot {config.DISCORD_TOKEN}", "Content-Type": "application/json"}
+        async with _aiohttp_v2.ClientSession() as _s:
+            await _s.post(_ch_url, headers=_hdrs, json={
+                "flags": 32768,
+                "components": [{"id": 1, "type": 17, "accent_color": 0x5865F2, "components": [
+                    {"id": 2, "type": 10, "content": f"## <:za_houst1:1483205696077037821> Criar Sala\n{ctx.author.mention} escolha o modo:"},
+                    {"id": 3, "type": 1, "components": [
+                        {"id": 4, "type": 2, "style": 2, "label": "Normal",      "custom_id": f"cs:modo:{uid}:1"},
+                        {"id": 5, "type": 2, "style": 2, "label": "Infinito",    "custom_id": f"cs:modo:{uid}:2"},
+                        {"id": 6, "type": 2, "style": 2, "label": "Outros Modos","custom_id": f"cs:modo:{uid}:3"},
+                    ]},
+                ]}],
+            })
 
-
-class CsSelectorView(discord.ui.View):
-    """View do .cs — só o autor pode clicar."""
-    def __init__(self, author_id: int):
-        super().__init__(timeout=120)
-        self.author_id = author_id
-
-    async def interaction_check(self, inter: discord.Interaction) -> bool:
-        if inter.user.id != self.author_id:
-            await inter.response.send_message("Esse menu não é seu.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="Normal", emoji=PE.get("jogadores"), style=discord.ButtonStyle.secondary, row=0)
-    async def btn_normal(self, inter, btn):
-        await _modo_btn(inter, 1)
-
-    @discord.ui.button(label="Infinito", emoji=PE.get("play"), style=discord.ButtonStyle.secondary, row=0)
-    async def btn_infinito(self, inter, btn):
-        await _modo_btn(inter, 2)
-
-    @discord.ui.button(label="Outros Modos", emoji=PE.get("top"), style=discord.ButtonStyle.secondary, row=0)
-    async def btn_outros(self, inter, btn):
-        em = _emb(f"{TOP}  Outros Modos")
-        em.description = f"{DOT} Escolha o modo:"
-        await inter.response.send_message(embed=em, view=C3ModoView(), ephemeral=True)
 
 
 class UsuarioSelectView(discord.ui.View):
@@ -4642,6 +4647,41 @@ class SalaV2Cog(commands.Cog):
                 return await inter.followup.send(embed=em, ephemeral=True)
 
             return  # cw:saldo / cw:gastas são disabled
+
+        # ── .cs modo selector ────────────────────────────────────────────────
+        if cid.startswith("cs:modo:"):
+            parts = cid.split(":")  # cs : modo : author_id : modo_num
+            if len(parts) < 4:
+                return
+            author_id_str, modo_str = parts[2], parts[3]
+            if str(inter.user.id) != author_id_str:
+                return await inter.response.send_message("Esse menu não é seu.", ephemeral=True)
+            modo_num = int(modo_str)
+            if modo_num == 3:
+                # Outros Modos — abre sub-menu ephemeral
+                em = _emb(f"{TOP}  Outros Modos")
+                em.description = f"{DOT} Escolha o modo:"
+                return await inter.response.send_message(embed=em, view=C3ModoView(), ephemeral=True)
+            # Normal (1) ou Infinito (2) — cria com resultado público no canal
+            if not await _safe_defer(inter, ephemeral=True):
+                return
+            uid = str(inter.user.id)
+            k, guild_pagou, gid = await _reservar_sala(inter, modo_num, uid, inter.user.display_name)
+            if not guild_pagou and not k:
+                return await inter.followup.send(
+                    embed=_err("Sem saldo", f"Sem saldo disponível.\nUse **Comprar Salas** no `/c` para adquirir."),
+                    ephemeral=True,
+                )
+            go = await asyncio.to_thread(go_config_get, uid)
+            if go <= 0:
+                go = config.DEFAULT_INICIAR_MINUTOS
+            await _criar_sala_flow(
+                inter, modo_num, go,
+                key_row=k, key_ja_consumida=True,
+                guild_pagou=guild_pagou, guild_id=gid,
+                public_channel_id=inter.channel_id,
+            )
+            return
 
         if not cid.startswith("sv2:"): return
         parts = cid.split(":", 2)
