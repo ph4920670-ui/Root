@@ -3534,6 +3534,41 @@ class MainCog(commands.Cog):
         em.description = f"{DOT} Escolha o modo da sala:"
         await ctx.send(embed=em, view=C3ModoView())
 
+    @commands.command(name="cs")
+    async def prefix_cs(self, ctx):
+        em = _emb("Criar Sala")
+        em.description = (
+            f"{DOT} Selecione o modo da sala que deseja criar:"
+        )
+        await ctx.send(embed=em, view=CsSelectorView(ctx.author.id))
+
+
+class CsSelectorView(discord.ui.View):
+    """View do .cs — só o autor pode clicar."""
+    def __init__(self, author_id: int):
+        super().__init__(timeout=120)
+        self.author_id = author_id
+
+    async def interaction_check(self, inter: discord.Interaction) -> bool:
+        if inter.user.id != self.author_id:
+            await inter.response.send_message("Esse menu não é seu.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Normal", emoji=PE.get("jogadores"), style=discord.ButtonStyle.secondary, row=0)
+    async def btn_normal(self, inter, btn):
+        await _modo_btn(inter, 1)
+
+    @discord.ui.button(label="Infinito", emoji=PE.get("play"), style=discord.ButtonStyle.secondary, row=0)
+    async def btn_infinito(self, inter, btn):
+        await _modo_btn(inter, 2)
+
+    @discord.ui.button(label="Outros Modos", emoji=PE.get("top"), style=discord.ButtonStyle.secondary, row=0)
+    async def btn_outros(self, inter, btn):
+        em = _emb(f"{TOP}  Outros Modos")
+        em.description = f"{DOT} Escolha o modo:"
+        await inter.response.send_message(embed=em, view=C3ModoView(), ephemeral=True)
+
 
 class UsuarioSelectView(discord.ui.View):
     def __init__(self, bot):
