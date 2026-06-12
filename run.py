@@ -62,6 +62,12 @@ def create_bot() -> commands.Bot:
             init_db()
         except Exception as e:
             _log.error(f"[Bot] init_db erro: {e}")
+        # Liga o logger de logs do Discord ao bot
+        try:
+            from utils import logs as _discord_logs
+            _discord_logs.init_logger(bot)
+        except Exception as e:
+            _log.error(f"[Bot] init_logger erro: {e}")
         # Salva o Client ID (= application id) no botconfig para o site usar no OAuth2
         try:
             from utils.database import botconfig_load, botconfig_save
