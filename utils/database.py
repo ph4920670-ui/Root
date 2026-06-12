@@ -208,6 +208,16 @@ def _load(col_name_or_path: str) -> dict:
         return {}
 
 
+def _save(col_name_or_path: str, data: dict = None) -> None:
+    """No-op compat shim — MongoDB _save não existe no Supabase (dados já salvos por upsert)."""
+    pass
+
+
+def _col_convites() -> _SupabaseCollectionCompat:
+    """Compat: retorna wrapper MongoDB-like para invites_system."""
+    return _SupabaseCollectionCompat("invites_system")
+
+
 def _now():
     return datetime.now(BRASILIA).isoformat()
 
