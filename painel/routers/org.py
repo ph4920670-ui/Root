@@ -6,11 +6,11 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from site.auth import get_session
+from painel.auth import get_session
 from utils.database import get_db
 
 router = APIRouter(prefix="/org")
-templates = Jinja2Templates(directory="site/templates")
+templates = Jinja2Templates(directory="painel/templates")
 
 
 def _require_org(request: Request):

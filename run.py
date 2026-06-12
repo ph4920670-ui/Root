@@ -87,8 +87,8 @@ def create_bot() -> commands.Bot:
 
 
 async def main():
-    # Importa o app FastAPI do site
-    from site.main import app as web_app
+    # Importa o app FastAPI do painel
+    from painel.main import app as web_app
 
     bot = create_bot()
 

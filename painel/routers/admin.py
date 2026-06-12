@@ -5,11 +5,11 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from site.auth import get_session, is_admin
+from painel.auth import get_session, is_admin
 from utils.database import get_db
 
 router = APIRouter(prefix="/admin")
-templates = Jinja2Templates(directory="site/templates")
+templates = Jinja2Templates(directory="painel/templates")
 
 
 def _require_admin(request: Request):

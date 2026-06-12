@@ -6,17 +6,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from site.auth import (
+from painel.auth import (
     get_oauth_url, exchange_code, fetch_user,
     get_session, set_session, clear_session_from_request, is_admin,
 )
-from site.routers import admin as admin_router
-from site.routers import org   as org_router
+from painel.routers import admin as admin_router
+from painel.routers import org   as org_router
 
 app = FastAPI(title="SalasFF Panel")
 
-app.mount("/static", StaticFiles(directory="site/static"), name="static")
-templates = Jinja2Templates(directory="site/templates")
+app.mount("/static", StaticFiles(directory="painel/static"), name="static")
+templates = Jinja2Templates(directory="painel/templates")
 
 app.include_router(admin_router.router)
 app.include_router(org_router.router)
@@ -98,4 +98,4 @@ async def logout(request: Request):
 # ── Entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    uvicorn.run("site.main:app", host="0.0.0.0", port=8080, reload=False)
+    uvicorn.run("painel.main:app", host="0.0.0.0", port=8080, reload=False)

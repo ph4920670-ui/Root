@@ -6,7 +6,7 @@ import httpx
 from datetime import datetime, timedelta, timezone
 from fastapi import Request, HTTPException
 
-from site.config import (
+from painel.config import (
     DISCORD_API,
     get_client_id, get_client_secret, get_redirect, get_admin_id,
 )
