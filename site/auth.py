@@ -1,53 +1,113 @@
-"""Discord OAuth2 helpers + cookie-based session management."""
+"""Discord OAuth2 helpers + Supabase-based session management."""
 
+import uuid
+import logging
 import httpx
+from datetime import datetime, timedelta, timezone
 from fastapi import Request, HTTPException
-from fastapi.responses import RedirectResponse
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from site.config import (
     DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET,
-    OAUTH2_REDIRECT, DISCORD_API, COOKIE_SECRET, ADMIN_DISCORD_ID,
+    OAUTH2_REDIRECT, DISCORD_API, ADMIN_DISCORD_ID,
 )
 
-_signer = URLSafeTimedSerializer(COOKIE_SECRET, salt="salasff-session")
+_log = logging.getLogger("salasff.site.auth")
 
-COOKIE_NAME = "salasff_session"
-COOKIE_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
-
-
-# ── Session helpers ────────────────────────────────────────────────────────
-
-def session_encode(data: dict) -> str:
-    return _signer.dumps(data)
+COOKIE_NAME = "salasff_sid"
+SESSION_TTL_DAYS = 7
 
 
-def session_decode(token: str) -> dict | None:
+# ── Supabase session helpers ───────────────────────────────────────────────
+
+def _supa():
+    from utils.database import get_db
+    return get_db()
+
+
+def _expires_at() -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)).isoformat()
+
+
+def _session_create(data: dict) -> str:
+    """Cria sessão no Supabase e retorna o session_id."""
+    sid = str(uuid.uuid4())
     try:
-        return _signer.loads(token, max_age=COOKIE_MAX_AGE)
-    except (BadSignature, SignatureExpired):
+        _supa().table("sessions").insert({
+            "id": sid,
+            "user_id": str(data.get("id", "")),
+            "user_name": data.get("username", ""),
+            "user_avatar": data.get("avatar", ""),
+            "data": data,
+            "expires_at": _expires_at(),
+            "criado_em": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    except Exception as e:
+        _log.error(f"[_session_create] {e}")
+    return sid
+
+
+def _session_get(sid: str) -> dict | None:
+    """Lê sessão do Supabase. Retorna None se não existir ou expirada."""
+    try:
+        res = _supa().table("sessions").select("*").eq("id", sid).maybe_single().execute()
+        if not res.data:
+            return None
+        row = res.data
+        exp = row.get("expires_at")
+        if exp:
+            exp_dt = datetime.fromisoformat(exp.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) >= exp_dt:
+                _session_delete(sid)
+                return None
+        return row.get("data") or {}
+    except Exception as e:
+        _log.error(f"[_session_get] {e}")
         return None
 
 
+def _session_delete(sid: str):
+    """Remove sessão do Supabase."""
+    try:
+        _supa().table("sessions").delete().eq("id", sid).execute()
+    except Exception as e:
+        _log.error(f"[_session_delete] {e}")
+
+
+# ── Public session interface ───────────────────────────────────────────────
+
 def set_session(response, data: dict):
+    """Cria sessão no Supabase e define cookie com o session_id."""
+    sid = _session_create(data)
     response.set_cookie(
         COOKIE_NAME,
-        session_encode(data),
-        max_age=COOKIE_MAX_AGE,
+        sid,
+        max_age=SESSION_TTL_DAYS * 86400,
         httponly=True,
         samesite="lax",
     )
 
 
 def clear_session(response):
+    """Remove cookie e apaga sessão do Supabase se o cookie existir."""
+    # Não temos acesso ao request aqui, então apenas apagamos o cookie.
+    # A sessão expirada será limpa automaticamente por TTL.
     response.delete_cookie(COOKIE_NAME)
 
 
 def get_session(request: Request) -> dict | None:
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
+    """Lê sessão a partir do cookie da requisição."""
+    sid = request.cookies.get(COOKIE_NAME)
+    if not sid:
         return None
-    return session_decode(token)
+    return _session_get(sid)
+
+
+def clear_session_from_request(request: Request, response):
+    """Remove cookie e apaga sessão do Supabase."""
+    sid = request.cookies.get(COOKIE_NAME)
+    if sid:
+        _session_delete(sid)
+    response.delete_cookie(COOKIE_NAME)
 
 
 def require_session(request: Request) -> dict:

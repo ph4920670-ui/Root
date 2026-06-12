@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from site.auth import (
     get_oauth_url, exchange_code, fetch_user,
-    get_session, set_session, clear_session, is_admin,
+    get_session, set_session, clear_session_from_request, is_admin,
 )
 from site.routers import admin as admin_router
 from site.routers import org   as org_router
@@ -32,9 +32,17 @@ async def index(request: Request):
     if is_admin(sess.get("id", "")):
         return RedirectResponse("/admin/")
     # Check if this user is an org owner
-    from site import db as _db
+    from utils.database import get_db
     uid = str(sess.get("id", ""))
-    org = _db.col_orgs().find_one({"owner_discord_id": uid, "ativo": True})
+    try:
+        res = (get_db().table("orgs").select("guild_id")
+               .eq("owner_discord_id", uid)
+               .eq("ativo", True)
+               .maybe_single()
+               .execute())
+        org = res.data
+    except Exception:
+        org = None
     if org:
         return RedirectResponse("/org/")
     return templates.TemplateResponse("no_access.html", {"request": request, "user": sess})
@@ -83,7 +91,7 @@ async def auth_callback(request: Request, code: str = "", error: str = ""):
 @app.get("/logout")
 async def logout(request: Request):
     response = RedirectResponse("/login")
-    clear_session(response)
+    clear_session_from_request(request, response)
     return response
 
 

@@ -1,11 +1,12 @@
 """Admin panel routes — only accessible by the bot owner."""
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from site.auth import get_session, is_admin
-from site import db as _db
+from utils.database import get_db
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory="site/templates")
@@ -26,15 +27,27 @@ async def admin_dashboard(request: Request):
     if not sess:
         return RedirectResponse("/login?next=/admin/")
 
-    guilds = list(_db.col_guild_config().find())
-    orgs   = {o["_id"]: o for o in _db.col_orgs().find()}
+    try:
+        res_guilds = get_db().table("guild_config").select("*").execute()
+        guilds = res_guilds.data or []
 
-    # Merge org info into guild list
-    for g in guilds:
-        gid = g.get("_id", "")
-        g["org"] = orgs.get(gid)
+        res_orgs = get_db().table("orgs").select("*").execute()
+        orgs = {o["guild_id"]: o for o in (res_orgs.data or [])}
 
-    pending_saques = list(_db.col_saques().find({"status": "pendente"}))
+        # Merge org info into guild list
+        for g in guilds:
+            gid = g.get("id", "")
+            g["org"] = orgs.get(gid)
+            # Compatibilidade com templates que usam g["_id"]
+            g.setdefault("_id", gid)
+
+        res_saques = get_db().table("saques").select("*").eq("status", "pendente").execute()
+        pending_saques = res_saques.data or []
+    except Exception as e:
+        import logging
+        logging.getLogger("salasff.site.admin").error(f"[admin_dashboard] {e}")
+        guilds = []
+        pending_saques = []
 
     return templates.TemplateResponse("admin/dashboard.html", {
         "request": request,
@@ -52,12 +65,22 @@ async def admin_server(request: Request, guild_id: str):
     if not sess:
         return RedirectResponse("/login?next=/admin/")
 
-    guild_cfg = _db.col_guild_config().find_one({"_id": guild_id}) or {}
-    org       = _db.col_orgs().find_one({"_id": guild_id}) or {}
+    try:
+        res_cfg = get_db().table("guild_config").select("*").eq("id", guild_id).maybe_single().execute()
+        guild_cfg = res_cfg.data or {}
+        guild_cfg.setdefault("_id", guild_id)
 
-    # Commands config
-    cmd_doc  = _db.col_guild_commands().find_one({"_id": guild_id}) or {}
-    commands = cmd_doc.get("commands", {})
+        res_org = get_db().table("orgs").select("*").eq("guild_id", guild_id).maybe_single().execute()
+        org = res_org.data or {}
+        org.setdefault("_id", guild_id)
+
+        res_cmd = get_db().table("guild_commands").select("commands").eq("guild_id", guild_id).maybe_single().execute()
+        commands = dict((res_cmd.data or {}).get("commands") or {})
+    except Exception:
+        guild_cfg = {}
+        org = {}
+        commands = {}
+
     all_cmds = ["c", "c1", "c2", "c3", "painel"]
     for cmd in all_cmds:
         if cmd not in commands:
@@ -89,21 +112,28 @@ async def admin_server_org(
 
     ativo_bool = ativo == "on"
 
-    existing = _db.col_orgs().find_one({"_id": guild_id}) or {}
-    from datetime import datetime, timezone
-    update = {
-        "ativo":            ativo_bool,
-        "nome":             nome or existing.get("nome", ""),
-        "owner_discord_id": owner_discord_id or existing.get("owner_discord_id", ""),
-        "porcentagem":      max(1, min(99, porcentagem)),
-    }
-    if not existing:
-        update["faturamento_total"] = 0.0
-        update["saldo_acumulado"]   = 0.0
-        update["salas_total"]       = 0
-        update["criado_em"]         = datetime.now(timezone.utc).isoformat()
+    try:
+        res = get_db().table("orgs").select("*").eq("guild_id", guild_id).maybe_single().execute()
+        existing = res.data or {}
 
-    _db.col_orgs().update_one({"_id": guild_id}, {"$set": update}, upsert=True)
+        update = {
+            "guild_id":         guild_id,
+            "ativo":            ativo_bool,
+            "nome":             nome or existing.get("nome", ""),
+            "owner_discord_id": owner_discord_id or existing.get("owner_discord_id", ""),
+            "porcentagem":      max(1, min(99, porcentagem)),
+        }
+        if not existing:
+            update["faturamento_total"] = 0.0
+            update["saldo_acumulado"]   = 0.0
+            update["salas_total"]       = 0
+            update["criado_em"]         = datetime.now(timezone.utc).isoformat()
+
+        get_db().table("orgs").upsert(update).execute()
+    except Exception as e:
+        import logging
+        logging.getLogger("salasff.site.admin").error(f"[admin_server_org] {e}")
+
     return RedirectResponse(f"/admin/server/{guild_id}?saved=1", status_code=303)
 
 
@@ -117,11 +147,15 @@ async def admin_server_commands(request: Request, guild_id: str):
     all_cmds = ["c", "c1", "c2", "c3", "painel"]
     commands = {cmd: (form.get(f"cmd_{cmd}") == "on") for cmd in all_cmds}
 
-    _db.col_guild_commands().update_one(
-        {"_id": guild_id},
-        {"$set": {"commands": commands}},
-        upsert=True,
-    )
+    try:
+        get_db().table("guild_commands").upsert({
+            "guild_id": guild_id,
+            "commands": commands,
+        }).execute()
+    except Exception as e:
+        import logging
+        logging.getLogger("salasff.site.admin").error(f"[admin_server_commands] {e}")
+
     return RedirectResponse(f"/admin/server/{guild_id}?saved=1", status_code=303)
 
 
@@ -133,7 +167,15 @@ async def admin_saques(request: Request):
     if not sess:
         return RedirectResponse("/login?next=/admin/saques")
 
-    saques = list(_db.col_saques().find({"status": "pendente"}).sort("criado_em", -1))
+    try:
+        res = (get_db().table("saques").select("*")
+               .eq("status", "pendente")
+               .order("criado_em", desc=True)
+               .execute())
+        saques = res.data or []
+    except Exception:
+        saques = []
+
     return templates.TemplateResponse("admin/saques.html", {
         "request": request,
         "user":    sess,
@@ -147,11 +189,15 @@ async def admin_saque_aprovar(request: Request, saque_id: str):
     if not sess:
         return RedirectResponse("/login")
 
-    from datetime import datetime, timezone
-    _db.col_saques().update_one(
-        {"_id": saque_id},
-        {"$set": {"status": "aprovado", "resolvido_em": datetime.now(timezone.utc).isoformat()}},
-    )
+    try:
+        get_db().table("saques").update({
+            "status": "aprovado",
+            "resolvido_em": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", saque_id).execute()
+    except Exception as e:
+        import logging
+        logging.getLogger("salasff.site.admin").error(f"[admin_saque_aprovar] {e}")
+
     return RedirectResponse("/admin/saques?msg=aprovado", status_code=303)
 
 
@@ -161,20 +207,26 @@ async def admin_saque_rejeitar(request: Request, saque_id: str, motivo: str = Fo
     if not sess:
         return RedirectResponse("/login")
 
-    from datetime import datetime, timezone
-    saque = _db.col_saques().find_one({"_id": saque_id})
-    if saque:
-        # Devolve saldo para a org
-        _db.col_orgs().update_one(
-            {"_id": saque.get("guild_id", "")},
-            {"$inc": {"saldo_acumulado": float(saque.get("valor", 0))}},
-        )
-    _db.col_saques().update_one(
-        {"_id": saque_id},
-        {"$set": {
+    try:
+        res = get_db().table("saques").select("*").eq("id", saque_id).maybe_single().execute()
+        saque = res.data
+
+        if saque:
+            # Devolve saldo para a org
+            gid = saque.get("guild_id", "")
+            if gid:
+                res_org = get_db().table("orgs").select("saldo_acumulado").eq("guild_id", gid).maybe_single().execute()
+                saldo_atual = float((res_org.data or {}).get("saldo_acumulado") or 0)
+                novo_saldo = round(saldo_atual + float(saque.get("valor") or 0), 2)
+                get_db().table("orgs").update({"saldo_acumulado": novo_saldo}).eq("guild_id", gid).execute()
+
+        get_db().table("saques").update({
             "status": "rejeitado",
             "resolvido_em": datetime.now(timezone.utc).isoformat(),
             "motivo_rejeicao": motivo,
-        }},
-    )
+        }).eq("id", saque_id).execute()
+    except Exception as e:
+        import logging
+        logging.getLogger("salasff.site.admin").error(f"[admin_saque_rejeitar] {e}")
+
     return RedirectResponse("/admin/saques?msg=rejeitado", status_code=303)

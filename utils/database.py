@@ -1,16 +1,12 @@
-# utils/database.py — MongoDB-based storage (v6 — PERSISTENT CLOUD DB)
+# utils/database.py — Supabase-based storage
 #
-# MIGRAÇÃO de JSON → MongoDB Atlas.
-# Cache em memória continua para performance (mesma lógica do v5).
-# Backend agora é MongoDB: dados NUNCA se perdem com restart/redeploy.
-#
+# Migração MongoDB → Supabase.
 # Interface pública 100% compatível — nenhum cog precisa mudar.
 #
 # COMPAT: KEYS_PATH, SALAS_PATH, PEDIDOS_PATH, DATA_DIR, _CODE_DIR
 # são mantidos como aliases para não quebrar imports existentes.
-# _load() e _save() aceitam tanto o path antigo quanto o nome da coleção.
 
-import uuid, secrets, string, os, logging, asyncio
+import uuid, secrets, string, os, logging
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from zoneinfo import ZoneInfo
@@ -20,259 +16,281 @@ _log = logging.getLogger("salasff.db")
 BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 # ══════════════════════════════════════════════════════════════
-#  MONGODB CONNECTION
+#  SUPABASE CONNECTION
 # ══════════════════════════════════════════════════════════════
 
-from pymongo import MongoClient, UpdateOne
+from supabase import create_client, Client
 
-MONGO_URI = os.environ.get(
-    "MONGO_URI",
-    "mongodb+srv://pedrinnight12_db_user:kitinho1210@cluster0.pde47ik.mongodb.net/salasff?retryWrites=true&w=majority"
-)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")  # service role key
 
-# Conexão configurada. Lembre-se de trocar a senha depois (exposta no chat).
+_client: Client = None
 
-_mongo_client = None
-_db = None
+
+def get_db() -> Client:
+    global _client
+    if _client is None:
+        _client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        _log.info("[Supabase] Client criado")
+    return _client
+
+
+# ══════════════════════════════════════════════════════════════
+#  COMPAT — aliases para imports antigos
+# ══════════════════════════════════════════════════════════════
+
+# _get_db: alias de compatibilidade para código legado que ainda usa _get_db().
+# Retorna um wrapper que suporta subscript ["table"] → SupabaseCollectionCompat.
+class _SupabaseCollectionCompat:
+    """Camada de compatibilidade para código legado que usa sintaxe MongoDB."""
+    def __init__(self, table_name: str):
+        self._t = table_name
+
+    def find_one(self, query: dict = None) -> dict | None:
+        try:
+            q = get_db().table(self._t).select("*")
+            for k, v in (query or {}).items():
+                if k == "_id":
+                    q = q.eq("id", v)
+                elif isinstance(v, dict):
+                    for op, val in v.items():
+                        if op == "$exists":
+                            if val:
+                                q = q.not_.is_(k, "null")
+                            else:
+                                q = q.is_(k, "null")
+                        elif op == "$ne":
+                            q = q.neq(k, val)
+                else:
+                    q = q.eq(k, v)
+            res = q.limit(1).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            _log.error(f"[compat find_one:{self._t}] {e}")
+            return None
+
+    def find(self, query: dict = None, projection: dict = None) -> list:
+        try:
+            q = get_db().table(self._t).select("*")
+            for k, v in (query or {}).items():
+                if k == "_id":
+                    if isinstance(v, dict) and "$in" in v:
+                        q = q.in_("id", v["$in"])
+                    else:
+                        q = q.eq("id", v)
+                elif isinstance(v, dict):
+                    for op, val in v.items():
+                        if op == "$exists":
+                            if val:
+                                q = q.not_.is_(k, "null")
+                        elif op == "$ne":
+                            q = q.neq(k, val)
+                        elif op == "$gte":
+                            q = q.gte(k, val)
+                else:
+                    q = q.eq(k, v)
+            res = q.execute()
+            return res.data or []
+        except Exception as e:
+            _log.error(f"[compat find:{self._t}] {e}")
+            return []
+
+    def update_one(self, query: dict, update: dict, upsert: bool = False):
+        try:
+            data = {}
+            if "$set" in update:
+                data.update({k: v for k, v in update["$set"].items()})
+            if "$unset" in update:
+                for k in update["$unset"]:
+                    data[k] = None
+            data.pop("_id", None)
+
+            q_id = query.get("_id")
+            if q_id:
+                if upsert:
+                    data["id"] = q_id
+                    get_db().table(self._t).upsert(data).execute()
+                else:
+                    get_db().table(self._t).update(data).eq("id", q_id).execute()
+            else:
+                filt = get_db().table(self._t).update(data)
+                for k, v in query.items():
+                    filt = filt.eq(k, v)
+                filt.execute()
+        except Exception as e:
+            _log.error(f"[compat update_one:{self._t}] {e}")
+
+    def insert_one(self, doc: dict):
+        try:
+            d = dict(doc)
+            if "_id" in d:
+                d["id"] = d.pop("_id")
+            get_db().table(self._t).insert(d).execute()
+        except Exception as e:
+            _log.error(f"[compat insert_one:{self._t}] {e}")
+
+    def delete_one(self, query: dict):
+        try:
+            q_id = query.get("_id")
+            if q_id:
+                get_db().table(self._t).delete().eq("id", q_id).execute()
+        except Exception as e:
+            _log.error(f"[compat delete_one:{self._t}] {e}")
+
+    def delete_many(self, query: dict):
+        try:
+            q = get_db().table(self._t).delete()
+            for k, v in (query or {}).items():
+                if isinstance(v, dict) and "$in" in v:
+                    q = q.in_(k, v["$in"])
+                else:
+                    q = q.eq(k, v)
+            q.execute()
+        except Exception as e:
+            _log.error(f"[compat delete_many:{self._t}] {e}")
+
+    def count_documents(self, query: dict = None) -> int:
+        return len(self.find(query))
+
+    def create_index(self, *args, **kwargs):
+        pass  # índices criados via SQL schema
+
+
+class _SupabaseDBCompat:
+    """Compatibilidade com _get_db()["collection"] do MongoDB."""
+    def __getitem__(self, table_name: str) -> _SupabaseCollectionCompat:
+        return _SupabaseCollectionCompat(table_name)
+
+    def __call__(self):
+        return self
+
+
+_db_compat = _SupabaseDBCompat()
+
 
 def _get_db():
-    global _mongo_client, _db
-    if _db is None:
-        _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        _db = _mongo_client["salasff"]
-        _log.info("[MongoDB] Conectado ao Atlas")
-    return _db
+    """Alias de compatibilidade para código legado. Retorna wrapper MongoDB-like."""
+    return _db_compat
 
-# Coleções
-def _col_keys():
-    return _get_db()["keys"]
-
-def _col_salas():
-    return _get_db()["salas"]
-
-def _col_pedidos():
-    return _get_db()["pedidos_pix"]
-
-def _col_lucro():
-    return _get_db()["lucro_config"]
-
-def _col_guild():
-    return _get_db()["guild_config"]
-
-def _col_bonus():
-    return _get_db()["bonus_data"]
-
-def _col_botconfig():
-    return _get_db()["botconfig"]
-
-# ── botconfig helpers ────────────────────────────────────────────────────
-_botconfig_cache = {}
-
-def botconfig_load() -> dict:
-    """Carrega botconfig do MongoDB (com cache)."""
-    global _botconfig_cache
-    if _botconfig_cache:
-        return dict(_botconfig_cache)
-    try:
-        doc = _col_botconfig().find_one({"_id": "main"})
-        if doc:
-            doc.pop("_id", None)
-            _botconfig_cache = doc
-            return dict(doc)
-    except Exception as e:
-        _log.warning(f"[botconfig load] {e}")
-    return {}
-
-def botconfig_save(data: dict):
-    """Salva botconfig no MongoDB e atualiza cache."""
-    global _botconfig_cache
-    _botconfig_cache = dict(data)
-    try:
-        d = dict(data)
-        d.pop("_id", None)
-        _col_botconfig().update_one({"_id": "main"}, {"$set": d}, upsert=True)
-    except Exception as e:
-        _log.error(f"[botconfig save] {e}")
-
-# ══════════════════════════════════════════════════════════════
-#  CACHE EM MEMÓRIA (mesma lógica do v5, agora sincroniza com Mongo)
-# ══════════════════════════════════════════════════════════════
-
-_lock = Lock()
-
-_cache = {}       # collection_name -> {doc_id: doc}
-_dirty = set()    # collection names que foram alterados
-
-# Mapeamento de nomes para funções de coleção
-_COLLECTIONS = {
-    "keys": _col_keys,
-    "salas": _col_salas,
-    "pedidos": _col_pedidos,
-}
-
-# ══════════════════════════════════════════════════════════════
-#  COMPAT — aliases para imports antigos (main.py, cogs/main.py)
-# ══════════════════════════════════════════════════════════════
 
 DATA_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CODE_DIR  = DATA_DIR
-KEYS_PATH    = "keys"      # antes era caminho de arquivo, agora é nome da coleção
+KEYS_PATH    = "keys"
 SALAS_PATH   = "salas"
 PEDIDOS_PATH = "pedidos"
 
-# Mapa path antigo → nome de coleção (caso alguém passe o path do JSON)
-_PATH_ALIASES = {}
-for _old_name, _col_name in [("keys.json", "keys"), ("salas.json", "salas"), ("pedidos_pix.json", "pedidos")]:
-    _PATH_ALIASES[os.path.join(DATA_DIR, _old_name)] = _col_name
+_lock = Lock()
+
+# Mapeamento para compatibilidade com código que usa _load("salas") etc.
+_COMPAT_TABLE = {
+    "keys":    "keys",
+    "salas":   "salas",
+    "pedidos": "pedidos_pix",
+}
+
+
+def _load(col_name_or_path: str) -> dict:
+    """Compatibilidade: carrega todos os docs de uma tabela como dict {id: doc}.
+    Aceita nomes de coleção antigos (keys, salas, pedidos) ou o path do JSON.
+    """
+    # Resolve alias
+    col = _COMPAT_TABLE.get(col_name_or_path)
+    if col is None:
+        # Tenta resolver pelo path: extrai basename sem extensão
+        import os as _os
+        base = _os.path.splitext(_os.path.basename(col_name_or_path))[0]
+        col = _COMPAT_TABLE.get(base, base)
+    try:
+        res = get_db().table(col).select("*").execute()
+        return {row["id"]: row for row in (res.data or [])}
+    except Exception as e:
+        _log.error(f"[_load compat] {col}: {e}")
+        return {}
+
 
 def _now():
     return datetime.now(BRASILIA).isoformat()
 
+
 def _now_utc():
     return datetime.now(timezone.utc).isoformat()
+
 
 def _code():
     ch = string.ascii_uppercase + string.digits
     return "-".join("".join(secrets.choice(ch) for _ in range(4)) for _ in range(4))
 
-def _load_from_mongo(col_name):
-    """Carrega todos os docs de uma coleção do MongoDB."""
+
+# ══════════════════════════════════════════════════════════════
+#  BOTCONFIG
+# ══════════════════════════════════════════════════════════════
+
+_botconfig_cache: dict = {}
+
+
+def botconfig_load() -> dict:
+    """Carrega botconfig do Supabase (com cache em memória)."""
+    global _botconfig_cache
+    if _botconfig_cache:
+        return dict(_botconfig_cache)
     try:
-        col_func = _COLLECTIONS[col_name]
-        col = col_func()
-        data = {}
-        for doc in col.find():
-            doc_id = doc.pop("_id")
-            data[str(doc_id)] = doc
-        _log.info(f"[_load_from_mongo] {col_name}: {len(data)} registros")
-        return data
+        res = get_db().table("botconfig").select("data").eq("id", "main").maybe_single().execute()
+        if res.data:
+            _botconfig_cache = dict(res.data.get("data") or {})
+            return dict(_botconfig_cache)
     except Exception as e:
-        _log.error(f"[_load_from_mongo] Erro ao carregar {col_name}: {e}")
-        return {}
+        _log.warning(f"[botconfig_load] {e}")
+    return {}
 
-def _resolve_col(name_or_path):
-    """Resolve um path antigo ou nome de coleção para o nome da coleção."""
-    if name_or_path in _COLLECTIONS:
-        return name_or_path
-    return _PATH_ALIASES.get(name_or_path, name_or_path)
 
-def _load(col_name):
-    """Retorna dados do cache em memória. Aceita nome de coleção ou path antigo."""
-    col_name = _resolve_col(col_name)
-    if col_name not in _cache:
-        _cache[col_name] = _load_from_mongo(col_name)
-    return _cache[col_name]
-
-def _save(col_name, data):
-    """Atualiza cache e marca para flush no MongoDB. Aceita nome de coleção ou path antigo."""
-    col_name = _resolve_col(col_name)
-    _cache[col_name] = data
-    _dirty.add(col_name)
-
-def _flush(col_name):
-    """Sincroniza dados dirty para o MongoDB."""
-    col_name = _resolve_col(col_name)
-    if col_name not in _dirty:
-        return
-    data = _cache.get(col_name)
-    if data is None:
-        return
+def botconfig_save(data: dict):
+    """Salva botconfig no Supabase e atualiza cache."""
+    global _botconfig_cache
+    _botconfig_cache = dict(data)
     try:
-        col_func = _COLLECTIONS[col_name]
-        col = col_func()
-
-        # Pega IDs existentes no Mongo
-        existing_ids = set()
-        for doc in col.find({}, {"_id": 1}):
-            existing_ids.add(str(doc["_id"]))
-
-        cache_ids = set(data.keys())
-
-        # Upsert todos os docs do cache
-        ops = []
-        for doc_id, doc_data in data.items():
-            doc_copy = dict(doc_data)
-            doc_copy.pop("_id", None)
-            ops.append(UpdateOne(
-                {"_id": doc_id},
-                {"$set": doc_copy},
-                upsert=True
-            ))
-
-        # Deletar docs que foram removidos do cache (ex: pruning)
-        removed = existing_ids - cache_ids
-        if removed:
-            col.delete_many({"_id": {"$in": list(removed)}})
-
-        if ops:
-            col.bulk_write(ops, ordered=False)
-
-        _dirty.discard(col_name)
-        _log.info(f"[_flush] {col_name}: {len(ops)} upserts, {len(removed)} removidos")
+        get_db().table("botconfig").upsert({"id": "main", "data": data}).execute()
     except Exception as e:
-        _log.error(f"[_flush] Erro ao salvar {col_name}: {e}")
+        _log.error(f"[botconfig_save] {e}")
 
-def flush_all():
-    """Força escrita de todos os caches dirty no MongoDB."""
-    for col_name in list(_dirty):
-        _flush(col_name)
-    # Também flush configs auxiliares (lucro, guild, bonus)
-    _flush_lucro()
-    _flush_guild()
-    _flush_bonus()
+
+# ══════════════════════════════════════════════════════════════
+#  INIT / PRUNING
+# ══════════════════════════════════════════════════════════════
 
 def init_db():
-    """Carrega os 3 coleções principais do MongoDB pro cache em memória."""
-    db = _get_db()
-
-    # Criar índices para performance
+    """Inicializa conexão com Supabase e faz pruning de salas antigas."""
     try:
-        _col_keys().create_index("dono_id")
-        _col_keys().create_index("code", unique=True, sparse=True)
-        _col_salas().create_index("user_id")
-        _col_salas().create_index("criado_em")
-        _col_salas().create_index("guild_id")
-        _col_pedidos().create_index("txid")
-        _col_pedidos().create_index("user_id")
-        _col_pedidos().create_index("status")
-        _log.info("[init_db] Índices MongoDB criados/verificados")
+        get_db()
+        _log.info("[init_db] Supabase conectado OK")
     except Exception as e:
-        _log.warning(f"[init_db] Erro ao criar índices: {e}")
+        _log.error(f"[init_db] Erro ao conectar Supabase: {e}")
+        return
 
-    # Prunar salas antigas direto no MongoDB antes de carregar (economiza RAM)
     try:
         limite = (datetime.now(BRASILIA) - timedelta(days=30)).isoformat()
-        result = _col_salas().delete_many({"criado_em": {"$lt": limite}})
-        if result.deleted_count > 0:
-            _log.info(f"[init_db] Pruning MongoDB: {result.deleted_count} salas antigas removidas")
+        res = get_db().table("salas").delete().lt("criado_em", limite).execute()
+        _log.info(f"[init_db] Pruning salas antigas: {len(res.data or [])} removidas")
     except Exception as ex:
         _log.warning(f"[init_db] Pruning erro: {ex}")
 
-    for col_name in ["keys", "salas", "pedidos"]:
-        try:
-            data = _load_from_mongo(col_name)
-            _cache[col_name] = data
-            _log.info(f"[init_db] {col_name}: {len(data)} registros OK (MongoDB)")
-        except Exception as ex:
-            _log.error(f"[init_db] {col_name} ERRO: {ex} — cache vazio")
-            _cache[col_name] = {}
-
-# ══════════════════════════════════════════════════════════════
-#  PRUNING — remove salas antigas pra manter RAM baixa
-# ══════════════════════════════════════════════════════════════
 
 def prunar_salas_antigas(dias=30):
     """Remove salas com mais de N dias."""
     limite = (datetime.now(BRASILIA) - timedelta(days=dias)).isoformat()
-    with _lock:
-        salas = _load("salas")
-        antes = len(salas)
-        salas_novas = {k: v for k, v in salas.items() if v.get("criado_em", "") >= limite}
-        removidas = antes - len(salas_novas)
-        if removidas > 0:
-            _save("salas", salas_novas)
-            _log.info(f"[pruning] Removidas {removidas} salas antigas (>{dias} dias). {len(salas_novas)} restantes.")
-    return removidas
+    try:
+        res = get_db().table("salas").delete().lt("criado_em", limite).execute()
+        removidas = len(res.data or [])
+        _log.info(f"[pruning] Removidas {removidas} salas antigas (>{dias} dias).")
+        return removidas
+    except Exception as e:
+        _log.error(f"[prunar_salas_antigas] {e}")
+        return 0
+
+
+def flush_all():
+    """Compatibilidade — no Supabase todas as escritas são síncronas."""
+    pass
+
 
 # ══════════════════════════════════════════════════════════════
 #  KEYS
@@ -280,32 +298,34 @@ def prunar_salas_antigas(dias=30):
 
 def criar_keys(quantia, modo, quantidade, criado_por):
     criadas = []
-    with _lock:
-        keys = _load("keys")
-        codigos = {k["code"] for k in keys.values()}
-        for _ in range(quantidade):
-            kid  = str(uuid.uuid4())
-            code = _code()
-            while code in codigos:
-                code = _code()
-            codigos.add(code)
-            keys[kid] = {
-                "id": kid, "code": code, "quantia": quantia,
-                "modo": modo, "salas_usadas": 0,
-                "criado_por": criado_por, "criado_em": _now(),
-                "dono_id": None, "dono_nome": None, "resgatado_em": None,
-            }
-            criadas.append({"id": kid, "code": code})
-        _save("keys", keys)
+    docs = []
+    for _ in range(quantidade):
+        kid  = str(uuid.uuid4())
+        code = _code()
+        docs.append({
+            "id": kid, "code": code, "quantia": quantia,
+            "modo": modo, "salas_usadas": 0,
+            "criado_por": criado_por, "criado_em": _now(),
+            "dono_id": None, "dono_nome": None, "resgatado_em": None,
+            "origem": "venda",
+        })
+        criadas.append({"id": kid, "code": code})
+    try:
+        get_db().table("keys").insert(docs).execute()
+    except Exception as e:
+        _log.error(f"[criar_keys] {e}")
     return criadas
 
+
 def buscar_key(code):
-    keys = _load("keys")
     code = code.upper().strip()
-    for k in keys.values():
-        if k["code"] == code:
-            return k
-    return None
+    try:
+        res = get_db().table("keys").select("*").eq("code", code).maybe_single().execute()
+        return res.data
+    except Exception as e:
+        _log.error(f"[buscar_key] {e}")
+        return None
+
 
 def validar_key(code):
     row = buscar_key(code)
@@ -315,170 +335,173 @@ def validar_key(code):
         return False, "❌ Esta key não tem mais salas disponíveis.", None
     return True, "OK", row
 
+
 def resgatar_key(code, user_id, user_nome):
     ok, msg, row = validar_key(code)
     if not ok:
         return False, msg, None
-    if row["dono_id"] and row["dono_id"] != user_id:
+    if row.get("dono_id") and row["dono_id"] != user_id:
         return False, "❌ Esta key já pertence a outro usuário.", None
-    with _lock:
-        keys = _load("keys")
-        if not keys[row["id"]]["dono_id"]:
-            keys[row["id"]]["dono_id"]      = user_id
-            keys[row["id"]]["dono_nome"]    = user_nome
-            keys[row["id"]]["resgatado_em"] = _now()
-            _save("keys", keys)
-        row = keys[row["id"]]
-    return True, "OK", row
+    try:
+        if not row.get("dono_id"):
+            get_db().table("keys").update({
+                "dono_id":      user_id,
+                "dono_nome":    user_nome,
+                "resgatado_em": _now(),
+            }).eq("id", row["id"]).execute()
+        # Relê para retornar dados atualizados
+        res = get_db().table("keys").select("*").eq("id", row["id"]).maybe_single().execute()
+        return True, "OK", res.data
+    except Exception as e:
+        _log.error(f"[resgatar_key] {e}")
+        return False, "Erro interno ao resgatar key.", None
+
 
 def consumir_sala_key(key_id):
-    with _lock:
-        keys = _load("keys")
-        if key_id in keys:
-            keys[key_id]["salas_usadas"] += 1
-            _save("keys", keys)
+    try:
+        res = get_db().table("keys").select("salas_usadas").eq("id", key_id).maybe_single().execute()
+        if res.data:
+            novo = (res.data["salas_usadas"] or 0) + 1
+            get_db().table("keys").update({"salas_usadas": novo}).eq("id", key_id).execute()
+    except Exception as e:
+        _log.error(f"[consumir_sala_key] {e}")
 
 
-def saldo_total_usuario(user_id) -> int:
-    """Retorna saldo total (soma de salas restantes em todas as keys) do user."""
-    with _lock:
-        keys = _load("keys")
-        total = 0
-        for k in keys.values():
-            if str(k.get("dono_id")) == str(user_id):
-                restante = int(k.get("quantia", 0)) - int(k.get("salas_usadas", 0))
-                if restante > 0:
-                    total += restante
-        return total
+def saldo_total_usuario(user_id, user_nome=None):
+    if user_nome:
+        _sincronizar_pendentes(user_id, user_nome)
+    try:
+        res = get_db().table("keys").select("quantia,salas_usadas").eq("dono_id", str(user_id)).execute()
+        keys = res.data or []
+        return sum(
+            (k["quantia"] - k["salas_usadas"])
+            for k in keys
+            if k["salas_usadas"] < k["quantia"]
+        )
+    except Exception as e:
+        _log.error(f"[saldo_total_usuario] {e}")
+        return 0
 
 
 def usuarios_com_saldo() -> list:
     """Retorna lista única de user_ids com saldo > 0."""
-    with _lock:
-        keys = _load("keys")
+    try:
+        res = get_db().table("keys").select("dono_id,quantia,salas_usadas").execute()
+        keys = res.data or []
         ativos = set()
-        for k in keys.values():
+        for k in keys:
             dono = k.get("dono_id")
             if not dono or str(dono).startswith("PENDENTE_"):
                 continue
-            restante = int(k.get("quantia", 0)) - int(k.get("salas_usadas", 0))
-            if restante > 0:
+            if k["salas_usadas"] < k["quantia"]:
                 ativos.add(str(dono))
         return list(ativos)
+    except Exception as e:
+        _log.error(f"[usuarios_com_saldo] {e}")
+        return []
+
+
+# Prioridade de consumo: venda → ranking → indicacao
+_ORIGEM_PRIORIDADE = {"venda": 0, "ranking": 1, "indicacao": 2}
+
+
+def _origem_de(k: dict) -> str:
+    o = k.get("origem")
+    if o in ("venda", "ranking", "indicacao"):
+        return o
+    return "venda"
+
 
 def reservar_sala_key(user_id, modo, user_nome=None):
-    """Atômico: encontra a melhor key com saldo e consome 1 sala.
-    Prioridade: origem venda→ranking→indicacao, com resgatado_em desc como desempate.
-    """
+    """Atômico: encontra a melhor key com saldo e consome 1 sala."""
     if user_nome:
         _sincronizar_pendentes(user_id, user_nome)
-    _sync_keys_do_mongo(user_id)
     with _lock:
-        keys = _load("keys")
-        elegiveis = [k for k in keys.values()
-                     if k["dono_id"] == user_id
-                     and k["salas_usadas"] < k["quantia"]
-                     and (k["modo"] == modo or k["modo"] == 0)]
-        if not elegiveis:
+        try:
+            res = get_db().table("keys").select("*").eq("dono_id", str(user_id)).execute()
+            keys = res.data or []
+            elegiveis = [k for k in keys
+                         if k["salas_usadas"] < k["quantia"]
+                         and (k["modo"] == modo or k["modo"] == 0)]
+            if not elegiveis:
+                return None, 0
+
+            # Ordena por prioridade de origem, depois resgatado_em desc
+            candidatas = sorted(elegiveis, key=lambda k: k.get("resgatado_em") or "", reverse=True)
+            candidatas = sorted(candidatas, key=lambda k: _ORIGEM_PRIORIDADE.get(_origem_de(k), 99))
+
+            chosen = candidatas[0]
+            novo_usado = chosen["salas_usadas"] + 1
+            get_db().table("keys").update({"salas_usadas": novo_usado}).eq("id", chosen["id"]).execute()
+            chosen["salas_usadas"] = novo_usado
+            restante = chosen["quantia"] - novo_usado
+            return dict(chosen), restante
+        except Exception as e:
+            _log.error(f"[reservar_sala_key] {e}")
             return None, 0
 
-        def _rank(k):
-            prio = _ORIGEM_PRIORIDADE.get(_origem_de(k), 99)
-            # resgatado_em ISO sorting funciona como string desc
-            ts = k.get("resgatado_em") or ""
-            return (prio, ts)  # menor prio + maior ts vence
-
-        # Primeiro pela menor prioridade (venda=0), depois ts desc
-        candidatas = sorted(elegiveis, key=lambda k: (_ORIGEM_PRIORIDADE.get(_origem_de(k), 99), -ord(_first_char(k.get("resgatado_em") or "0"))))
-        # Forma mais simples: ordena por prio asc, depois ts desc, em duas passadas
-        candidatas = sorted(elegiveis, key=lambda k: k.get("resgatado_em") or "", reverse=True)
-        candidatas = sorted(candidatas, key=lambda k: _ORIGEM_PRIORIDADE.get(_origem_de(k), 99))
-
-        chosen = candidatas[0]
-        keys[chosen["id"]]["salas_usadas"] += 1
-        _save("keys", keys)
-        restante = chosen["quantia"] - keys[chosen["id"]]["salas_usadas"]
-        return dict(keys[chosen["id"]]), restante
-
-
-def _first_char(s):
-    return s[0] if s else "0"
 
 def reverter_sala_key(key_id):
     """Reverte 1 sala consumida (rollback se a API falhar)."""
-    with _lock:
-        keys = _load("keys")
-        if key_id in keys and keys[key_id]["salas_usadas"] > 0:
-            keys[key_id]["salas_usadas"] -= 1
-            _save("keys", keys)
+    try:
+        res = get_db().table("keys").select("salas_usadas").eq("id", key_id).maybe_single().execute()
+        if res.data and res.data["salas_usadas"] > 0:
+            novo = res.data["salas_usadas"] - 1
+            get_db().table("keys").update({"salas_usadas": novo}).eq("id", key_id).execute()
+    except Exception as e:
+        _log.error(f"[reverter_sala_key] {e}")
+
 
 def _sincronizar_pendentes(user_id, user_nome):
-    with _lock:
-        keys = _load("keys")
-        alterado = False
-        nome_lower = user_nome.lower().strip()
-        for k in keys.values():
-            dono = k.get("dono_id", "")
-            if dono and dono.startswith("PENDENTE_"):
-                nome_key = dono.replace("PENDENTE_", "").replace("_", " ").lower().strip()
-                if nome_key == nome_lower or k.get("dono_nome", "").lower().strip() == nome_lower:
-                    k["dono_id"] = user_id
-                    k["dono_nome"] = user_nome
-                    alterado = True
-        if alterado:
-            _save("keys", keys)
-
-def _sync_keys_do_mongo(user_id):
-    """Consulta o MongoDB por keys desse user_id e insere no cache qualquer uma
-    que ainda não esteja lá. Necessário porque o site Node.js cria keys direto
-    no Mongo (resgate de salas grátis) e o cache em memória do bot não sabe.
-    """
+    """Sincroniza keys com dono PENDENTE_ para o user_id real."""
     try:
-        col = _COLLECTIONS["keys"]()
-        # Busca todas as keys desse dono no Mongo
-        docs = list(col.find({"dono_id": user_id}))
-        if not docs:
-            return 0
-        cache_keys = _cache.get("keys")
-        if cache_keys is None:
-            cache_keys = _load_from_mongo("keys")
-            _cache["keys"] = cache_keys
-        adicionados = 0
-        for doc in docs:
-            doc_id = str(doc.pop("_id"))
-            if doc_id not in cache_keys:
-                cache_keys[doc_id] = doc
-                adicionados += 1
-        if adicionados:
-            _log.info(f"[_sync_keys_do_mongo] user={user_id} +{adicionados} keys sincronizadas do Mongo")
-        return adicionados
+        nome_lower = user_nome.lower().strip()
+        res = get_db().table("keys").select("id,dono_id,dono_nome").execute()
+        keys = res.data or []
+        for k in keys:
+            dono = k.get("dono_id") or ""
+            if not dono.startswith("PENDENTE_"):
+                continue
+            nome_key = dono.replace("PENDENTE_", "").replace("_", " ").lower().strip()
+            if nome_key == nome_lower or (k.get("dono_nome") or "").lower().strip() == nome_lower:
+                get_db().table("keys").update({
+                    "dono_id": user_id,
+                    "dono_nome": user_nome,
+                }).eq("id", k["id"]).execute()
     except Exception as e:
-        _log.warning(f"[_sync_keys_do_mongo] user={user_id} erro: {e}")
-        return 0
+        _log.warning(f"[_sincronizar_pendentes] {e}")
 
 
 def keys_do_usuario(user_id, user_nome=None):
     if user_nome:
         _sincronizar_pendentes(user_id, user_nome)
-    _sync_keys_do_mongo(user_id)
-    keys = _load("keys")
-    return sorted(
-        [k for k in keys.values() if k["dono_id"] == user_id],
-        key=lambda k: k.get("resgatado_em") or "", reverse=True
-    )
+    try:
+        res = get_db().table("keys").select("*").eq("dono_id", str(user_id)).execute()
+        keys = res.data or []
+        return sorted(keys, key=lambda k: k.get("resgatado_em") or "", reverse=True)
+    except Exception as e:
+        _log.error(f"[keys_do_usuario] {e}")
+        return []
+
 
 def todas_keys_com_saldo():
-    keys = _load("keys")
-    return sorted(
-        [k for k in keys.values() if k["dono_id"] and k["salas_usadas"] < k["quantia"]],
-        key=lambda k: (k.get("dono_nome") or "").lower()
-    )
+    try:
+        res = get_db().table("keys").select("*").execute()
+        keys = res.data or []
+        return sorted(
+            [k for k in keys if k.get("dono_id") and k["salas_usadas"] < k["quantia"]],
+            key=lambda k: (k.get("dono_nome") or "").lower()
+        )
+    except Exception as e:
+        _log.error(f"[todas_keys_com_saldo] {e}")
+        return []
+
 
 def remover_salas_cliente(user_id, quantidade):
-    with _lock:
-        keys = _load("keys")
+    try:
+        res = get_db().table("keys").select("*").eq("dono_id", str(user_id)).execute()
         user_keys = sorted(
-            [k for k in keys.values() if k["dono_id"] == user_id and k["salas_usadas"] < k["quantia"]],
+            [k for k in (res.data or []) if k["salas_usadas"] < k["quantia"]],
             key=lambda k: k.get("resgatado_em") or ""
         )
         removidas = 0
@@ -487,76 +510,59 @@ def remover_salas_cliente(user_id, quantidade):
                 break
             disp  = k["quantia"] - k["salas_usadas"]
             remov = min(disp, quantidade - removidas)
-            keys[k["id"]]["salas_usadas"] += remov
+            novo_usado = k["salas_usadas"] + remov
+            get_db().table("keys").update({"salas_usadas": novo_usado}).eq("id", k["id"]).execute()
+            k["salas_usadas"] = novo_usado
             removidas += remov
-        _save("keys", keys)
+
+        # Recalcula total restante
+        res2 = get_db().table("keys").select("quantia,salas_usadas").eq("dono_id", str(user_id)).execute()
         total = sum(
             k["quantia"] - k["salas_usadas"]
-            for k in keys.values()
-            if k["dono_id"] == user_id
+            for k in (res2.data or [])
+            if k["salas_usadas"] < k["quantia"]
         )
-    return removidas, int(total)
+        return removidas, int(total)
+    except Exception as e:
+        _log.error(f"[remover_salas_cliente] {e}")
+        return 0, 0
 
-def saldo_total_usuario(user_id, user_nome=None):
-    if user_nome:
-        _sincronizar_pendentes(user_id, user_nome)
-    _sync_keys_do_mongo(user_id)
-    keys = _load("keys")
-    return sum(
-        k["quantia"] - k["salas_usadas"]
-        for k in keys.values()
-        if k["dono_id"] == user_id and k["salas_usadas"] < k["quantia"]
-    )
 
 def adicionar_saldo_usuario(user_id, user_nome, quantidade, origem: str = "venda"):
-    """Adiciona saldo creditando uma key.
-    `origem` define a "categoria" do saldo: 'venda', 'ranking', 'indicacao'.
-    """
+    """Adiciona saldo creditando uma key."""
     if origem not in ("venda", "ranking", "indicacao"):
         origem = "venda"
-    with _lock:
-        keys = _load("keys")
-        codigos = {k["code"] for k in keys.values()}
-        kid  = str(uuid.uuid4())
-        code = _code()
-        while code in codigos:
-            code = _code()
-        keys[kid] = {
+    kid  = str(uuid.uuid4())
+    code = _code()
+    try:
+        get_db().table("keys").insert({
             "id": kid, "code": code, "quantia": quantidade,
             "modo": 0, "salas_usadas": 0,
             "criado_por": "admin_restauracao", "criado_em": _now(),
             "dono_id": user_id, "dono_nome": user_nome, "resgatado_em": _now(),
             "origem": origem,
-        }
-        _save("keys", keys)
+        }).execute()
+    except Exception as e:
+        _log.error(f"[adicionar_saldo_usuario] {e}")
     return code
-
-
-# Prioridade de consumo: venda → ranking → indicacao
-_ORIGEM_PRIORIDADE = {"venda": 0, "ranking": 1, "indicacao": 2}
-
-
-def _origem_de(k: dict) -> str:
-    """Retorna a origem da key (default venda pra keys antigas sem campo)."""
-    o = k.get("origem")
-    if o in ("venda", "ranking", "indicacao"):
-        return o
-    return "venda"
 
 
 def saldo_por_origem(user_id: str) -> dict:
     """Retorna o saldo do user separado por origem: {venda, ranking, indicacao}."""
-    _sync_keys_do_mongo(user_id)
-    keys = _load("keys")
-    out = {"venda": 0, "ranking": 0, "indicacao": 0}
-    for k in keys.values():
-        if k["dono_id"] != user_id:
-            continue
-        if k["salas_usadas"] >= k["quantia"]:
-            continue
-        rest = k["quantia"] - k["salas_usadas"]
-        out[_origem_de(k)] += rest
-    return out
+    try:
+        res = get_db().table("keys").select("quantia,salas_usadas,origem").eq("dono_id", str(user_id)).execute()
+        keys = res.data or []
+        out = {"venda": 0, "ranking": 0, "indicacao": 0}
+        for k in keys:
+            if k["salas_usadas"] >= k["quantia"]:
+                continue
+            rest = k["quantia"] - k["salas_usadas"]
+            out[_origem_de(k)] += rest
+        return out
+    except Exception as e:
+        _log.error(f"[saldo_por_origem] {e}")
+        return {"venda": 0, "ranking": 0, "indicacao": 0}
+
 
 # ══════════════════════════════════════════════════════════════
 #  SALAS
@@ -564,78 +570,98 @@ def saldo_por_origem(user_id: str) -> dict:
 
 def registrar_sala(user_id, user_nome, modo, guild_id=None, saldo_origem="pessoal"):
     sid = str(uuid.uuid4())
-    with _lock:
-        salas = _load("salas")
-        salas[sid] = {
+    try:
+        get_db().table("salas").insert({
             "id": sid, "user_id": user_id, "user_nome": user_nome,
             "modo": modo, "pedidoid": None, "sala_id": None,
             "sala_senha": None, "sala_nome": None, "criado_em": _now(),
             "guild_id": str(guild_id) if guild_id else None,
             "saldo_origem": saldo_origem,
-        }
-        _save("salas", salas)
+        }).execute()
+    except Exception as e:
+        _log.error(f"[registrar_sala] {e}")
     return sid
 
+
 def atualizar_sala(sid, pedidoid, sala_id, senha, nome, link=None):
-    with _lock:
-        salas = _load("salas")
-        if sid in salas:
-            update_data = {"pedidoid": pedidoid, "sala_id": sala_id, "sala_senha": senha, "sala_nome": nome}
-            if link:
-                update_data["sala_link"] = link
-            salas[sid].update(update_data)
-            _save("salas", salas)
+    try:
+        update_data = {"pedidoid": pedidoid, "sala_id": sala_id, "sala_senha": senha, "sala_nome": nome}
+        if link:
+            update_data["sala_link"] = link
+        get_db().table("salas").update(update_data).eq("id", sid).execute()
+    except Exception as e:
+        _log.error(f"[atualizar_sala] {e}")
+
 
 def salas_usuario_periodo(user_id, horas):
     desde = (datetime.now(BRASILIA) - timedelta(hours=horas)).isoformat()
-    salas = _load("salas")
-    return sum(1 for s in salas.values() if s["user_id"] == user_id and s["criado_em"] >= desde)
+    try:
+        res = get_db().table("salas").select("id").eq("user_id", str(user_id)).gte("criado_em", desde).execute()
+        return len(res.data or [])
+    except Exception as e:
+        _log.error(f"[salas_usuario_periodo] {e}")
+        return 0
+
 
 def salas_usuario_ontem(user_id):
     agora = datetime.now(BRASILIA)
     hoje_meia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
     ontem_meia = (hoje_meia - timedelta(days=1)).isoformat()
     ate_ontem = hoje_meia.isoformat()
-    salas = _load("salas")
-    return sum(1 for s in salas.values()
-               if s["user_id"] == user_id and ontem_meia <= s["criado_em"] < ate_ontem)
+    try:
+        res = (get_db().table("salas").select("id")
+               .eq("user_id", str(user_id))
+               .gte("criado_em", ontem_meia)
+               .lt("criado_em", ate_ontem)
+               .execute())
+        return len(res.data or [])
+    except Exception as e:
+        _log.error(f"[salas_usuario_ontem] {e}")
+        return 0
+
 
 def perfil_usuario(user_id):
-    """Versão otimizada: carrega salas e keys 1x só."""
-    salas = _load("salas")
-    keys  = _load("keys")
+    """Retorna estatísticas de salas e saldo do usuário."""
     agora = datetime.now(BRASILIA)
-
-    user_salas = [s for s in salas.values() if s["user_id"] == user_id]
-
     hoje_meia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
-    ontem_meia = (hoje_meia - timedelta(days=1))
+    ontem_meia = hoje_meia - timedelta(days=1)
     desde_hoje = hoje_meia.isoformat()
     desde_ontem = ontem_meia.isoformat()
     ate_ontem = hoje_meia.isoformat()
 
-    def _contar_desde(dias):
-        desde = (agora - timedelta(days=dias)).isoformat()
-        return sum(1 for s in user_salas if s["criado_em"] >= desde)
+    try:
+        res_salas = get_db().table("salas").select("criado_em").eq("user_id", str(user_id)).execute()
+        user_salas = res_salas.data or []
 
-    hoje_count = sum(1 for s in user_salas if s["criado_em"] >= desde_hoje)
-    ontem_count = sum(1 for s in user_salas if desde_ontem <= s["criado_em"] < ate_ontem)
+        res_keys = get_db().table("keys").select("quantia,salas_usadas").eq("dono_id", str(user_id)).execute()
+        keys = res_keys.data or []
 
-    saldo = sum(
-        k["quantia"] - k["salas_usadas"]
-        for k in keys.values()
-        if k["dono_id"] == user_id and k["salas_usadas"] < k["quantia"]
-    )
+        def _contar_desde(dias):
+            desde = (agora - timedelta(days=dias)).isoformat()
+            return sum(1 for s in user_salas if (s["criado_em"] or "") >= desde)
 
-    return {
-        "hoje":   hoje_count,
-        "ontem":  ontem_count,
-        "3dias":  _contar_desde(3),
-        "semana": _contar_desde(7),
-        "mes":    _contar_desde(30),
-        "total":  len(user_salas),
-        "saldo":  saldo,
-    }
+        hoje_count = sum(1 for s in user_salas if (s["criado_em"] or "") >= desde_hoje)
+        ontem_count = sum(1 for s in user_salas
+                          if desde_ontem <= (s["criado_em"] or "") < ate_ontem)
+        saldo = sum(
+            k["quantia"] - k["salas_usadas"]
+            for k in keys
+            if k["salas_usadas"] < k["quantia"]
+        )
+
+        return {
+            "hoje":   hoje_count,
+            "ontem":  ontem_count,
+            "3dias":  _contar_desde(3),
+            "semana": _contar_desde(7),
+            "mes":    _contar_desde(30),
+            "total":  len(user_salas),
+            "saldo":  saldo,
+        }
+    except Exception as e:
+        _log.error(f"[perfil_usuario] {e}")
+        return {"hoje": 0, "ontem": 0, "3dias": 0, "semana": 0, "mes": 0, "total": 0, "saldo": 0}
+
 
 # ══════════════════════════════════════════════════════════════
 #  PEDIDOS PIX
@@ -643,21 +669,16 @@ def perfil_usuario(user_id):
 
 def expirar_pedidos_velhos():
     limite = (datetime.now(BRASILIA) - timedelta(hours=2)).isoformat()
-    with _lock:
-        pedidos = _load("pedidos")
-        alterado = False
-        for p in pedidos.values():
-            if p.get("status") == "pendente" and (p.get("criado_em") or "") < limite:
-                p["status"] = "expirado"
-                alterado = True
-        if alterado:
-            _save("pedidos", pedidos)
+    try:
+        get_db().table("pedidos_pix").update({"status": "expirado"}).eq("status", "pendente").lt("criado_em", limite).execute()
+    except Exception as e:
+        _log.error(f"[expirar_pedidos_velhos] {e}")
+
 
 def criar_pedido_pix(user_id, user_nome, txid, quantia, valor, banco: str = None, guild_id: str = None, guild_nome: str = None):
     pid = str(uuid.uuid4())
-    with _lock:
-        pedidos = _load("pedidos")
-        pedidos[pid] = {
+    try:
+        get_db().table("pedidos_pix").insert({
             "id": pid, "user_id": user_id, "user_nome": user_nome,
             "txid": txid, "quantia": quantia, "valor": valor,
             "status": "pendente", "criado_em": _now(),
@@ -665,132 +686,131 @@ def criar_pedido_pix(user_id, user_nome, txid, quantia, valor, banco: str = None
             "banco": banco or "mistic",
             "guild_id": str(guild_id) if guild_id else None,
             "guild_nome": guild_nome,
-        }
-        _save("pedidos", pedidos)
+        }).execute()
+    except Exception as e:
+        _log.error(f"[criar_pedido_pix] {e}")
     return pid
 
+
 def buscar_pedido_por_txid(txid):
-    pedidos = _load("pedidos")
-    for p in pedidos.values():
-        if p["txid"] == txid:
-            return p
-    return None
+    try:
+        res = get_db().table("pedidos_pix").select("*").eq("txid", str(txid)).maybe_single().execute()
+        return res.data
+    except Exception as e:
+        _log.error(f"[buscar_pedido_por_txid] {e}")
+        return None
+
 
 def confirmar_pedido_pix(txid, nome_pagador: str = None, endtoend: str = None):
-    with _lock:
-        pedidos = _load("pedidos")
-        for p in pedidos.values():
-            if p["txid"] == txid:
-                p["status"] = "pago"
-                p["pago_em"] = _now()
-                if nome_pagador:
-                    p["nome_pagador"] = nome_pagador
-                if endtoend:
-                    p["endtoend"] = endtoend
-        _save("pedidos", pedidos)
+    try:
+        update_data = {"status": "pago", "pago_em": _now()}
+        if nome_pagador:
+            update_data["nome_pagador"] = nome_pagador
+        if endtoend:
+            update_data["endtoend"] = endtoend
+        get_db().table("pedidos_pix").update(update_data).eq("txid", str(txid)).execute()
+    except Exception as e:
+        _log.error(f"[confirmar_pedido_pix] {e}")
+
 
 def pedidos_pendentes():
-    pedidos = _load("pedidos")
-    return [p for p in pedidos.values() if p["status"] == "pendente"]
+    try:
+        res = get_db().table("pedidos_pix").select("*").eq("status", "pendente").execute()
+        return res.data or []
+    except Exception as e:
+        _log.error(f"[pedidos_pendentes] {e}")
+        return []
+
 
 def salvar_key_pedido(txid, key_code):
-    with _lock:
-        pedidos = _load("pedidos")
-        for p in pedidos.values():
-            if p["txid"] == txid:
-                p["key_gerada"] = key_code
-        _save("pedidos", pedidos)
+    try:
+        get_db().table("pedidos_pix").update({"key_gerada": key_code}).eq("txid", str(txid)).execute()
+    except Exception as e:
+        _log.error(f"[salvar_key_pedido] {e}")
+
 
 def pedidos_por_nome(nome, limite=None):
-    pedidos = _load("pedidos")
-    result = [p for p in pedidos.values() if nome.lower() in p["user_nome"].lower()]
-    result = sorted(result, key=lambda p: p["criado_em"], reverse=True)
-    return result[:limite] if limite else result
+    try:
+        res = get_db().table("pedidos_pix").select("*").ilike("user_nome", f"%{nome}%").execute()
+        result = sorted(res.data or [], key=lambda p: p["criado_em"] or "", reverse=True)
+        return result[:limite] if limite else result
+    except Exception as e:
+        _log.error(f"[pedidos_por_nome] {e}")
+        return []
+
 
 def pedidos_por_id(user_id, limite=None):
-    pedidos = _load("pedidos")
-    result = [p for p in pedidos.values() if p["user_id"] == user_id]
-    result = sorted(result, key=lambda p: p["criado_em"], reverse=True)
-    return result[:limite] if limite else result
+    try:
+        res = get_db().table("pedidos_pix").select("*").eq("user_id", str(user_id)).execute()
+        result = sorted(res.data or [], key=lambda p: p["criado_em"] or "", reverse=True)
+        return result[:limite] if limite else result
+    except Exception as e:
+        _log.error(f"[pedidos_por_id] {e}")
+        return []
+
 
 def vendas_usuario(user_id: str = None) -> dict:
-    """Retorna salas vendidas (pedidos pagos) por período.
-    Se user_id=None, retorna totais gerais do negócio.
-    """
     agora   = datetime.now(BRASILIA)
     hoje    = agora.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     ontem_i = (agora.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)).isoformat()
     d7      = (agora - timedelta(days=7)).isoformat()
 
-    pedidos = _load("pedidos")
-    if user_id:
-        pagos = [p for p in pedidos.values()
-                 if p["status"] == "pago" and p.get("user_id") == user_id]
-    else:
-        pagos = [p for p in pedidos.values() if p["status"] == "pago"]
+    try:
+        q = get_db().table("pedidos_pix").select("quantia,pago_em,user_id").eq("status", "pago")
+        if user_id:
+            q = q.eq("user_id", str(user_id))
+        res = q.execute()
+        pagos = res.data or []
 
-    v_hoje  = sum(p["quantia"] for p in pagos if (p.get("pago_em") or "") >= hoje)
-    v_ontem = sum(p["quantia"] for p in pagos if ontem_i <= (p.get("pago_em") or "") < hoje)
-    v7d     = sum(p["quantia"] for p in pagos if (p.get("pago_em") or "") >= d7)
-    vtot    = sum(p["quantia"] for p in pagos)
+        v_hoje  = sum(p["quantia"] for p in pagos if (p.get("pago_em") or "") >= hoje)
+        v_ontem = sum(p["quantia"] for p in pagos if ontem_i <= (p.get("pago_em") or "") < hoje)
+        v7d     = sum(p["quantia"] for p in pagos if (p.get("pago_em") or "") >= d7)
+        vtot    = sum(p["quantia"] for p in pagos)
 
-    return {
-        "hoje":   v_hoje,
-        "ontem":  v_ontem,
-        "semana": v7d,
-        "total":  vtot,
-    }
+        return {"hoje": v_hoje, "ontem": v_ontem, "semana": v7d, "total": vtot}
+    except Exception as e:
+        _log.error(f"[vendas_usuario] {e}")
+        return {"hoje": 0, "ontem": 0, "semana": 0, "total": 0}
 
 
 def salas_criadas_usuario(user_id: str) -> dict:
-    """Retorna nº de SALAS que o usuário CRIOU (não compras PIX) por período.
-    Usado pelo painel 'Ver Lucro' do usuário comum — ele lucra criando salas
-    pros clientes dele, então o lucro é (salas_criadas * valor_por_sala).
-    """
     agora   = datetime.now(BRASILIA)
     hoje_d  = agora.replace(hour=0, minute=0, second=0, microsecond=0)
     hoje    = hoje_d.isoformat()
     ontem_i = (hoje_d - timedelta(days=1)).isoformat()
     d7      = (agora - timedelta(days=7)).isoformat()
 
-    salas = _load("salas")
-    minhas = [s for s in salas.values() if s.get("user_id") == user_id]
+    try:
+        res = get_db().table("salas").select("criado_em").eq("user_id", str(user_id)).execute()
+        minhas = res.data or []
 
-    def _ts(s):
-        return s.get("criado_em") or ""
+        def _ts(s):
+            return s.get("criado_em") or ""
 
-    n_hoje   = sum(1 for s in minhas if _ts(s) >= hoje)
-    n_ontem  = sum(1 for s in minhas if ontem_i <= _ts(s) < hoje)
-    n_semana = sum(1 for s in minhas if _ts(s) >= d7)
-    n_total  = len(minhas)
-
-    return {
-        "hoje":   n_hoje,
-        "ontem":  n_ontem,
-        "semana": n_semana,
-        "total":  n_total,
-    }
+        return {
+            "hoje":   sum(1 for s in minhas if _ts(s) >= hoje),
+            "ontem":  sum(1 for s in minhas if ontem_i <= _ts(s) < hoje),
+            "semana": sum(1 for s in minhas if _ts(s) >= d7),
+            "total":  len(minhas),
+        }
+    except Exception as e:
+        _log.error(f"[salas_criadas_usuario] {e}")
+        return {"hoje": 0, "ontem": 0, "semana": 0, "total": 0}
 
 
 def lucro_resumo(user_id: str = None) -> dict:
-    """Retorna resumo financeiro completo: receita, custo, bônus, lucro líquido.
-
-    Períodos: hoje / ontem / semana (7d) / total
-    - receita: R$ recebido em pedidos pagos
-    - salas_vendidas: nº de salas vendidas (pedidos pagos)
-    - bonus_dadas: salas dadas grátis (eventos + resgates de bônus)
-    - custo: (salas_vendidas + bonus_dadas) × valor_compra_por_sala
-    - lucro_bruto: receita - custo
-    - perda_bonus: bonus_dadas × valor_compra_por_sala (custo de presentear)
-    """
     agora   = datetime.now(BRASILIA)
     hoje_d  = agora.replace(hour=0, minute=0, second=0, microsecond=0)
     hoje    = hoje_d.isoformat()
     ontem_i = (hoje_d - timedelta(days=1)).isoformat()
     d7      = (agora - timedelta(days=7)).isoformat()
 
-    pedidos = _load("pedidos")
-    pagos = [p for p in pedidos.values() if p.get("status") == "pago"]
+    try:
+        res = get_db().table("pedidos_pix").select("quantia,valor,pago_em").eq("status", "pago").execute()
+        pagos = res.data or []
+    except Exception as e:
+        _log.error(f"[lucro_resumo] pedidos {e}")
+        pagos = []
 
     def _no_periodo(p, ini, fim=None):
         ts = p.get("pago_em") or ""
@@ -809,13 +829,18 @@ def lucro_resumo(user_id: str = None) -> dict:
     s_tot,  r_tot    = _agg(lambda p: True)
 
     # Bônus dado: keys com criado_por começando em "EVENTO_" + bonus_resgatado total
-    keys = _load("keys")
+    try:
+        res_keys = get_db().table("keys").select("quantia,criado_por,criado_em").execute()
+        all_keys = res_keys.data or []
+    except Exception:
+        all_keys = []
+
     def _bonus_keys_periodo(ini, fim=None):
         total = 0
-        for k in keys.values():
+        for k in all_keys:
             if not str(k.get("criado_por", "")).startswith(("EVENTO_", "bonus_evento_")):
                 continue
-            ts = k.get("criado_em") or k.get("resgatado_em") or ""
+            ts = k.get("criado_em") or ""
             if fim:
                 if ini <= ts < fim:
                     total += int(k.get("quantia", 0))
@@ -827,21 +852,16 @@ def lucro_resumo(user_id: str = None) -> dict:
     b_hoje  = _bonus_keys_periodo(hoje)
     b_ont   = _bonus_keys_periodo(ontem_i, hoje)
     b_7d    = _bonus_keys_periodo(d7)
-    b_tot   = sum(int(k.get("quantia", 0)) for k in keys.values()
+    b_tot   = sum(int(k.get("quantia", 0)) for k in all_keys
                   if str(k.get("criado_por", "")).startswith(("EVENTO_", "bonus_evento_")))
 
-    # Bônus resgatados (sistema /c → Bônus): adiciona ao total de bônus dado
     try:
-        bonus_data = _load_bonus()
-        # bonus_resgatado é cumulativo, não dá pra filtrar por período facilmente
-        # então só somamos no total
-        bonus_resgatado_tot = sum(int(reg.get("bonus_resgatado", 0)) for reg in bonus_data.values())
+        res_bonus = get_db().table("bonus_data").select("bonus_resgatado").execute()
+        bonus_resgatado_tot = sum(int(r.get("bonus_resgatado", 0)) for r in (res_bonus.data or []))
         b_tot += bonus_resgatado_tot
     except Exception:
         pass
 
-    # Custo: precisa de lucro_config_get(user_id) pra pegar valor_compra_por_sala
-    # Default: 0.03 se não configurado
     valor_compra = 0.03
     if user_id:
         try:
@@ -878,122 +898,146 @@ def lucro_periodo():
     d3     = (agora - timedelta(days=3)).isoformat()
     d7     = (agora - timedelta(days=7)).isoformat()
 
-    salas = _load("salas")
-    todas = list(salas.values())
-    c_hoje = sum(1 for s in todas if s["criado_em"] >= hoje)
-    c3d    = sum(1 for s in todas if s["criado_em"] >= d3)
-    c7d    = sum(1 for s in todas if s["criado_em"] >= d7)
-    ctot   = len(todas)
+    try:
+        res_salas = get_db().table("salas").select("criado_em").execute()
+        todas = res_salas.data or []
+        c_hoje = sum(1 for s in todas if (s["criado_em"] or "") >= hoje)
+        c3d    = sum(1 for s in todas if (s["criado_em"] or "") >= d3)
+        c7d    = sum(1 for s in todas if (s["criado_em"] or "") >= d7)
+        ctot   = len(todas)
 
-    pedidos = _load("pedidos")
-    pagos   = [p for p in pedidos.values() if p["status"] == "pago"]
-    v_hoje  = sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= hoje)
-    v3d     = sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= d3)
-    v7d     = sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= d7)
-    vtot    = sum(p["quantia"] for p in pagos)
+        res_ped = get_db().table("pedidos_pix").select("quantia,pago_em").eq("status", "pago").execute()
+        pagos = res_ped.data or []
+        v_hoje  = sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= hoje)
+        v3d     = sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= d3)
+        v7d     = sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= d7)
+        vtot    = sum(p["quantia"] for p in pagos)
 
-    lps = 0.03
-    return {
-        "vendidas_hoje": v_hoje, "lucro_hoje": round(v_hoje * lps, 2),
-        "vendidas_3d":   v3d,    "lucro_3d":  round(v3d  * lps, 2),
-        "vendidas_7d":   v7d,    "lucro_7d":  round(v7d  * lps, 2),
-        "vendidas_tot":  vtot,   "lucro_tot": round(vtot * lps, 2),
-        "criadas_hoje":  c_hoje,
-        "criadas_3d":    c3d,
-        "criadas_7d":    c7d,
-        "criadas_tot":   ctot,
-    }
+        lps = 0.03
+        return {
+            "vendidas_hoje": v_hoje, "lucro_hoje": round(v_hoje * lps, 2),
+            "vendidas_3d":   v3d,    "lucro_3d":  round(v3d  * lps, 2),
+            "vendidas_7d":   v7d,    "lucro_7d":  round(v7d  * lps, 2),
+            "vendidas_tot":  vtot,   "lucro_tot": round(vtot * lps, 2),
+            "criadas_hoje":  c_hoje,
+            "criadas_3d":    c3d,
+            "criadas_7d":    c7d,
+            "criadas_tot":   ctot,
+        }
+    except Exception as e:
+        _log.error(f"[lucro_periodo] {e}")
+        return {k: 0 for k in ["vendidas_hoje","lucro_hoje","vendidas_3d","lucro_3d","vendidas_7d","lucro_7d","vendidas_tot","lucro_tot","criadas_hoje","criadas_3d","criadas_7d","criadas_tot"]}
+
 
 def stats_globais():
     agora = datetime.now(BRASILIA)
     hoje_meia  = agora.replace(hour=0, minute=0, second=0, microsecond=0)
-    ontem_meia = (hoje_meia - timedelta(days=1))
+    ontem_meia = hoje_meia - timedelta(days=1)
     desde_hoje  = hoje_meia.isoformat()
     desde_ontem = ontem_meia.isoformat()
     ate_ontem   = hoje_meia.isoformat()
     d7   = (agora - timedelta(days=7)).isoformat()
-    salas   = _load("salas")
-    pedidos = _load("pedidos")
-    pagos   = [p for p in pedidos.values() if p["status"] == "pago"]
-    return {
-        "salas_hoje":   sum(1 for s in salas.values() if s["criado_em"] >= desde_hoje),
-        "salas_ontem":  sum(1 for s in salas.values() if desde_ontem <= s["criado_em"] < ate_ontem),
-        "salas_7d":     sum(1 for s in salas.values() if s["criado_em"] >= d7),
-        "salas_tot":    len(salas),
-        "vendas_hoje":  sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= desde_hoje),
-        "vendas_ontem": sum(p["quantia"] for p in pagos if desde_ontem <= (p["pago_em"] or "") < ate_ontem),
-        "vendas_7d":    sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= d7),
-        "vendas_tot":   sum(p["quantia"] for p in pagos),
-        "pedidos_hoje":  sum(1 for p in pagos if (p["pago_em"] or "") >= desde_hoje),
-        "pedidos_ontem": sum(1 for p in pagos if desde_ontem <= (p["pago_em"] or "") < ate_ontem),
-        "pedidos_7d":    sum(1 for p in pagos if (p["pago_em"] or "") >= d7),
-        "pedidos_tot":   len(pagos),
-        "receita_hoje":  sum(p["valor"] for p in pagos if (p["pago_em"] or "") >= desde_hoje),
-        "receita_ontem": sum(p["valor"] for p in pagos if desde_ontem <= (p["pago_em"] or "") < ate_ontem),
-        "receita_7d":    sum(p["valor"] for p in pagos if (p["pago_em"] or "") >= d7),
-        "receita_tot":   sum(p["valor"] for p in pagos),
-    }
+
+    try:
+        res_salas = get_db().table("salas").select("criado_em").execute()
+        salas = res_salas.data or []
+
+        res_ped = get_db().table("pedidos_pix").select("quantia,valor,pago_em").eq("status", "pago").execute()
+        pagos = res_ped.data or []
+
+        return {
+            "salas_hoje":   sum(1 for s in salas if (s["criado_em"] or "") >= desde_hoje),
+            "salas_ontem":  sum(1 for s in salas if desde_ontem <= (s["criado_em"] or "") < ate_ontem),
+            "salas_7d":     sum(1 for s in salas if (s["criado_em"] or "") >= d7),
+            "salas_tot":    len(salas),
+            "vendas_hoje":  sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= desde_hoje),
+            "vendas_ontem": sum(p["quantia"] for p in pagos if desde_ontem <= (p["pago_em"] or "") < ate_ontem),
+            "vendas_7d":    sum(p["quantia"] for p in pagos if (p["pago_em"] or "") >= d7),
+            "vendas_tot":   sum(p["quantia"] for p in pagos),
+            "pedidos_hoje":  sum(1 for p in pagos if (p["pago_em"] or "") >= desde_hoje),
+            "pedidos_ontem": sum(1 for p in pagos if desde_ontem <= (p["pago_em"] or "") < ate_ontem),
+            "pedidos_7d":    sum(1 for p in pagos if (p["pago_em"] or "") >= d7),
+            "pedidos_tot":   len(pagos),
+            "receita_hoje":  sum(float(p["valor"] or 0) for p in pagos if (p["pago_em"] or "") >= desde_hoje),
+            "receita_ontem": sum(float(p["valor"] or 0) for p in pagos if desde_ontem <= (p["pago_em"] or "") < ate_ontem),
+            "receita_7d":    sum(float(p["valor"] or 0) for p in pagos if (p["pago_em"] or "") >= d7),
+            "receita_tot":   sum(float(p["valor"] or 0) for p in pagos),
+        }
+    except Exception as e:
+        _log.error(f"[stats_globais] {e}")
+        return {k: 0 for k in ["salas_hoje","salas_ontem","salas_7d","salas_tot","vendas_hoje","vendas_ontem","vendas_7d","vendas_tot","pedidos_hoje","pedidos_ontem","pedidos_7d","pedidos_tot","receita_hoje","receita_ontem","receita_7d","receita_tot"]}
+
 
 def ultimas_compras(limite=None):
-    pedidos = _load("pedidos")
-    pagos = [p for p in pedidos.values() if p["status"] == "pago"]
-    result = sorted(pagos, key=lambda p: p["pago_em"] or "", reverse=True)
-    return result[:limite] if limite else result
+    try:
+        res = get_db().table("pedidos_pix").select("*").eq("status", "pago").order("pago_em", desc=True).execute()
+        result = res.data or []
+        return result[:limite] if limite else result
+    except Exception as e:
+        _log.error(f"[ultimas_compras] {e}")
+        return []
+
 
 def top_compradores(limite=None):
-    pedidos = _load("pedidos")
-    pagos = [p for p in pedidos.values() if p["status"] == "pago"]
-    totais = {}
-    for p in pagos:
-        uid = p["user_id"]
-        if uid not in totais:
-            totais[uid] = {"user_nome": p["user_nome"], "pedidos": 0, "total_salas": 0, "total_valor": 0.0}
-        totais[uid]["pedidos"]     += 1
-        totais[uid]["total_salas"] += p["quantia"]
-        totais[uid]["total_valor"] += p["valor"]
-    result = sorted(totais.values(), key=lambda x: x["total_salas"], reverse=True)
-    return result[:limite] if limite else result
+    try:
+        res = get_db().table("pedidos_pix").select("user_id,user_nome,quantia,valor").eq("status", "pago").execute()
+        pagos = res.data or []
+        totais = {}
+        for p in pagos:
+            uid = p["user_id"]
+            if uid not in totais:
+                totais[uid] = {"user_nome": p["user_nome"], "pedidos": 0, "total_salas": 0, "total_valor": 0.0}
+            totais[uid]["pedidos"]     += 1
+            totais[uid]["total_salas"] += p["quantia"]
+            totais[uid]["total_valor"] += float(p["valor"] or 0)
+        result = sorted(totais.values(), key=lambda x: x["total_salas"], reverse=True)
+        return result[:limite] if limite else result
+    except Exception as e:
+        _log.error(f"[top_compradores] {e}")
+        return []
+
 
 def stats_por_guild(limite=None):
-    """Retorna vendas PIX pagas agrupadas por servidor de origem.
-    Retorna lista de dicts ordenada por salas vendidas (maior primeiro).
-    """
     agora = datetime.now(BRASILIA)
     hoje_meia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
     desde_hoje = hoje_meia.isoformat()
     d7 = (agora - timedelta(days=7)).isoformat()
 
-    pedidos = _load("pedidos")
-    pagos = [p for p in pedidos.values() if p.get("status") == "pago"]
-    grupos = {}
-    for p in pagos:
-        gid = p.get("guild_id") or "desconhecido"
-        gnome = p.get("guild_nome") or ("DM / Direto" if gid == "desconhecido" else f"ID {gid}")
-        if gid not in grupos:
-            grupos[gid] = {
-                "guild_id": gid, "guild_nome": gnome,
-                "pedidos_hoje": 0, "pedidos_7d": 0, "pedidos_tot": 0,
-                "salas_hoje": 0, "salas_7d": 0, "salas_tot": 0,
-                "receita_hoje": 0.0, "receita_7d": 0.0, "receita_tot": 0.0,
-            }
-        g = grupos[gid]
-        pago_em = p.get("pago_em") or ""
-        g["pedidos_tot"] += 1
-        g["salas_tot"] += p.get("quantia", 0)
-        g["receita_tot"] += float(p.get("valor", 0.0))
-        if pago_em >= d7:
-            g["pedidos_7d"] += 1
-            g["salas_7d"] += p.get("quantia", 0)
-            g["receita_7d"] += float(p.get("valor", 0.0))
-        if pago_em >= desde_hoje:
-            g["pedidos_hoje"] += 1
-            g["salas_hoje"] += p.get("quantia", 0)
-            g["receita_hoje"] += float(p.get("valor", 0.0))
-    result = sorted(grupos.values(), key=lambda x: x["salas_tot"], reverse=True)
-    return result[:limite] if limite else result
+    try:
+        res = get_db().table("pedidos_pix").select("guild_id,guild_nome,quantia,valor,pago_em").eq("status", "pago").execute()
+        pagos = res.data or []
+        grupos = {}
+        for p in pagos:
+            gid = p.get("guild_id") or "desconhecido"
+            gnome = p.get("guild_nome") or ("DM / Direto" if gid == "desconhecido" else f"ID {gid}")
+            if gid not in grupos:
+                grupos[gid] = {
+                    "guild_id": gid, "guild_nome": gnome,
+                    "pedidos_hoje": 0, "pedidos_7d": 0, "pedidos_tot": 0,
+                    "salas_hoje": 0, "salas_7d": 0, "salas_tot": 0,
+                    "receita_hoje": 0.0, "receita_7d": 0.0, "receita_tot": 0.0,
+                }
+            g = grupos[gid]
+            pago_em = p.get("pago_em") or ""
+            g["pedidos_tot"] += 1
+            g["salas_tot"] += p.get("quantia", 0)
+            g["receita_tot"] += float(p.get("valor", 0.0))
+            if pago_em >= d7:
+                g["pedidos_7d"] += 1
+                g["salas_7d"] += p.get("quantia", 0)
+                g["receita_7d"] += float(p.get("valor", 0.0))
+            if pago_em >= desde_hoje:
+                g["pedidos_hoje"] += 1
+                g["salas_hoje"] += p.get("quantia", 0)
+                g["receita_hoje"] += float(p.get("valor", 0.0))
+        result = sorted(grupos.values(), key=lambda x: x["salas_tot"], reverse=True)
+        return result[:limite] if limite else result
+    except Exception as e:
+        _log.error(f"[stats_por_guild] {e}")
+        return []
+
 
 def stats_guild(guild_id: str) -> dict:
-    """Estatísticas de salas criadas com saldo do servidor."""
     agora = datetime.now(BRASILIA)
     hoje_meia  = agora.replace(hour=0, minute=0, second=0, microsecond=0)
     ontem_meia = hoje_meia - timedelta(days=1)
@@ -1004,162 +1048,163 @@ def stats_guild(guild_id: str) -> dict:
     d7  = (agora - timedelta(days=7)).isoformat()
     d30 = (agora - timedelta(days=30)).isoformat()
 
-    salas = _load("salas")
-    guild_salas = [s for s in salas.values()
-                   if s.get("guild_id") == str(guild_id)
-                   and s.get("saldo_origem") == "guild"]
-
-    hoje   = sum(1 for s in guild_salas if s["criado_em"] >= desde_hoje)
-    ontem  = sum(1 for s in guild_salas if desde_ontem <= s["criado_em"] < ate_ontem)
-    tres   = sum(1 for s in guild_salas if s["criado_em"] >= d3)
-    semana = sum(1 for s in guild_salas if s["criado_em"] >= d7)
-    mes    = sum(1 for s in guild_salas if s["criado_em"] >= d30)
-    total  = len(guild_salas)
-
-    criadores: dict = {}
-    for s in guild_salas:
-        uid = s["user_id"]
-        if uid not in criadores:
-            criadores[uid] = {"nome": s.get("user_nome", "?"), "total": 0}
-        criadores[uid]["total"] += 1
-    top3 = sorted(criadores.values(), key=lambda x: x["total"], reverse=True)[:3]
-
-    return {
-        "hoje": hoje, "ontem": ontem, "3dias": tres,
-        "semana": semana, "mes": mes, "total": total,
-        "top3": top3,
-    }
-
-# ══════════════════════════════════════════════════════════════
-#  LUCRO CONFIG POR USUÁRIO (agora no MongoDB)
-# ══════════════════════════════════════════════════════════════
-
-_lucro_cache = None
-_lucro_dirty = False
-
-def _load_lucro():
-    global _lucro_cache
-    if _lucro_cache is None:
-        try:
-            col = _col_lucro()
-            _lucro_cache = {}
-            for doc in col.find():
-                uid = doc.pop("_id")
-                _lucro_cache[uid] = doc
-        except Exception:
-            _lucro_cache = {}
-    return _lucro_cache
-
-def _save_lucro_cache(data):
-    global _lucro_cache, _lucro_dirty
-    _lucro_cache = data
-    _lucro_dirty = True
-
-def _flush_lucro():
-    global _lucro_dirty
-    if not _lucro_dirty or _lucro_cache is None:
-        return
     try:
-        col = _col_lucro()
-        ops = []
-        for uid, doc_data in _lucro_cache.items():
-            doc_copy = dict(doc_data)
-            doc_copy.pop("_id", None)
-            ops.append(UpdateOne({"_id": uid}, {"$set": doc_copy}, upsert=True))
-        if ops:
-            col.bulk_write(ops, ordered=False)
-        _lucro_dirty = False
+        res = (get_db().table("salas").select("criado_em,user_id,user_nome")
+               .eq("guild_id", str(guild_id))
+               .eq("saldo_origem", "guild")
+               .execute())
+        guild_salas = res.data or []
+
+        hoje   = sum(1 for s in guild_salas if (s["criado_em"] or "") >= desde_hoje)
+        ontem  = sum(1 for s in guild_salas if desde_ontem <= (s["criado_em"] or "") < ate_ontem)
+        tres   = sum(1 for s in guild_salas if (s["criado_em"] or "") >= d3)
+        semana = sum(1 for s in guild_salas if (s["criado_em"] or "") >= d7)
+        mes    = sum(1 for s in guild_salas if (s["criado_em"] or "") >= d30)
+        total  = len(guild_salas)
+
+        criadores: dict = {}
+        for s in guild_salas:
+            uid = s["user_id"]
+            if uid not in criadores:
+                criadores[uid] = {"nome": s.get("user_nome", "?"), "total": 0}
+            criadores[uid]["total"] += 1
+        top3 = sorted(criadores.values(), key=lambda x: x["total"], reverse=True)[:3]
+
+        return {
+            "hoje": hoje, "ontem": ontem, "3dias": tres,
+            "semana": semana, "mes": mes, "total": total,
+            "top3": top3,
+        }
     except Exception as e:
-        _log.error(f"[_flush_lucro] Erro: {e}")
+        _log.error(f"[stats_guild] {e}")
+        return {"hoje": 0, "ontem": 0, "3dias": 0, "semana": 0, "mes": 0, "total": 0, "top3": []}
+
+
+# ══════════════════════════════════════════════════════════════
+#  LUCRO CONFIG POR USUÁRIO
+# ══════════════════════════════════════════════════════════════
 
 def lucro_config_get(user_id: str) -> dict:
-    data = _load_lucro()
-    return data.get(user_id, {"valor_por_sala": 0, "orgs": []})
+    try:
+        res = get_db().table("lucro_config").select("*").eq("user_id", str(user_id)).maybe_single().execute()
+        if res.data:
+            return res.data
+    except Exception as e:
+        _log.warning(f"[lucro_config_get] {e}")
+    return {"valor_por_sala": 0, "orgs": [], "go_tempo": 0, "sala_senha": ""}
+
 
 def lucro_config_set_valor(user_id: str, valor: float):
-    data = _load_lucro()
-    if user_id not in data:
-        data[user_id] = {"valor_por_sala": 0, "orgs": []}
-    data[user_id]["valor_por_sala"] = valor
-    _save_lucro_cache(data)
-    _flush_lucro()
+    try:
+        get_db().table("lucro_config").upsert({
+            "user_id": str(user_id), "valor_por_sala": valor
+        }).execute()
+    except Exception as e:
+        _log.error(f"[lucro_config_set_valor] {e}")
+
 
 def lucro_config_add_org(user_id: str, nome: str, guild_id: str, valor: float):
-    data = _load_lucro()
-    if user_id not in data:
-        data[user_id] = {"valor_por_sala": 0, "orgs": []}
-    data[user_id]["orgs"].append({"nome": nome, "guild_id": guild_id, "valor": valor})
-    _save_lucro_cache(data)
-    _flush_lucro()
+    try:
+        cfg = lucro_config_get(user_id)
+        orgs = list(cfg.get("orgs") or [])
+        orgs.append({"nome": nome, "guild_id": guild_id, "valor": valor})
+        get_db().table("lucro_config").upsert({
+            "user_id": str(user_id), "orgs": orgs
+        }).execute()
+    except Exception as e:
+        _log.error(f"[lucro_config_add_org] {e}")
+
 
 def lucro_config_set_org(user_id: str, idx: int, nome: str, guild_id: str, valor: float):
-    data = _load_lucro()
-    if user_id in data and idx < len(data[user_id].get("orgs", [])):
-        data[user_id]["orgs"][idx] = {"nome": nome, "guild_id": guild_id, "valor": valor}
-        _save_lucro_cache(data)
-        _flush_lucro()
+    try:
+        cfg = lucro_config_get(user_id)
+        orgs = list(cfg.get("orgs") or [])
+        if idx < len(orgs):
+            orgs[idx] = {"nome": nome, "guild_id": guild_id, "valor": valor}
+            get_db().table("lucro_config").upsert({
+                "user_id": str(user_id), "orgs": orgs
+            }).execute()
+    except Exception as e:
+        _log.error(f"[lucro_config_set_org] {e}")
+
 
 def lucro_config_remove_org(user_id: str, idx: int):
-    data = _load_lucro()
-    if user_id in data and idx < len(data[user_id].get("orgs", [])):
-        data[user_id]["orgs"].pop(idx)
-        _save_lucro_cache(data)
-        _flush_lucro()
+    try:
+        cfg = lucro_config_get(user_id)
+        orgs = list(cfg.get("orgs") or [])
+        if idx < len(orgs):
+            orgs.pop(idx)
+            get_db().table("lucro_config").upsert({
+                "user_id": str(user_id), "orgs": orgs
+            }).execute()
+    except Exception as e:
+        _log.error(f"[lucro_config_remove_org] {e}")
+
 
 def go_config_get(user_id: str) -> int:
-    data = _load_lucro()
-    return data.get(user_id, {}).get("go_tempo", 0)
+    cfg = lucro_config_get(user_id)
+    return int(cfg.get("go_tempo") or 0)
+
 
 def go_config_set(user_id: str, minutos: int):
-    data = _load_lucro()
-    if user_id not in data:
-        data[user_id] = {"valor_por_sala": 0, "orgs": []}
-    data[user_id]["go_tempo"] = max(1, min(10, minutos))
-    _save_lucro_cache(data)
-    _flush_lucro()
+    try:
+        get_db().table("lucro_config").upsert({
+            "user_id": str(user_id), "go_tempo": max(1, min(10, minutos))
+        }).execute()
+    except Exception as e:
+        _log.error(f"[go_config_set] {e}")
 
 
 def senha_config_get(user_id: str) -> str:
-    """Retorna a senha personalizada do user pra criar salas, ou '' (vazio = sem senha)."""
-    data = _load_lucro()
-    return data.get(user_id, {}).get("sala_senha", "") or ""
+    cfg = lucro_config_get(user_id)
+    return (cfg.get("sala_senha") or "")
 
 
 def senha_config_set(user_id: str, senha: str):
-    """Salva senha personalizada. String vazia remove (volta a criar sem senha)."""
-    data = _load_lucro()
-    if user_id not in data:
-        data[user_id] = {"valor_por_sala": 0, "orgs": []}
-    s = (senha or "").strip()
-    # Limita 32 chars (limite das APIs) e remove espaços só pra ser conservador
-    data[user_id]["sala_senha"] = s[:32]
-    _save_lucro_cache(data)
-    _flush_lucro()
+    try:
+        s = (senha or "").strip()[:32]
+        get_db().table("lucro_config").upsert({
+            "user_id": str(user_id), "sala_senha": s
+        }).execute()
+    except Exception as e:
+        _log.error(f"[senha_config_set] {e}")
+
 
 def clientes_por_guild(guild_id: str) -> dict:
-    """Retorna dict {user_id: {nome, salas_usadas}} de quem usou saldo deste servidor."""
-    salas = _load("salas")
-    clientes = {}
-    for s in salas.values():
-        if s.get("guild_id") == str(guild_id) and s.get("saldo_origem") == "guild":
+    try:
+        res = (get_db().table("salas").select("user_id,user_nome")
+               .eq("guild_id", str(guild_id))
+               .eq("saldo_origem", "guild")
+               .execute())
+        clientes = {}
+        for s in (res.data or []):
             uid = s.get("user_id", "")
             if not uid:
                 continue
             if uid not in clientes:
                 clientes[uid] = {"nome": s.get("user_nome") or uid, "salas_usadas": 0}
             clientes[uid]["salas_usadas"] += 1
-    return clientes
+        return clientes
+    except Exception as e:
+        _log.error(f"[clientes_por_guild] {e}")
+        return {}
 
 
 def salas_usuario_por_guild(user_id: str, guild_id: str, horas: int) -> int:
     desde = (datetime.now(BRASILIA) - timedelta(hours=horas)).isoformat()
-    salas = _load("salas")
-    return sum(1 for s in salas.values()
-               if s["user_id"] == user_id
-               and s.get("guild_id") == guild_id
-               and s["criado_em"] >= desde)
+    try:
+        res = (get_db().table("salas").select("id")
+               .eq("user_id", str(user_id))
+               .eq("guild_id", str(guild_id))
+               .gte("criado_em", desde)
+               .execute())
+        return len(res.data or [])
+    except Exception as e:
+        _log.error(f"[salas_usuario_por_guild] {e}")
+        return 0
 
-def stats_usuario_por_guilds(user_id: str, guild_ids: list[str]) -> dict:
+
+def stats_usuario_por_guilds(user_id: str, guild_ids: list) -> dict:
     agora = datetime.now(BRASILIA)
     hoje_meia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
     ontem_meia = hoje_meia - timedelta(days=1)
@@ -1169,184 +1214,137 @@ def stats_usuario_por_guilds(user_id: str, guild_ids: list[str]) -> dict:
     desde_3d = (agora - timedelta(days=3)).isoformat()
     desde_7d = (agora - timedelta(days=7)).isoformat()
 
-    gid_set = set(guild_ids)
     result = {gid: {"hoje": 0, "ontem": 0, "3dias": 0, "7dias": 0, "total": 0} for gid in guild_ids}
+    gid_set = set(guild_ids)
 
-    salas = _load("salas")
-    for s in salas.values():
-        if s["user_id"] != user_id:
-            continue
-        sgid = s.get("guild_id")
-        if sgid not in gid_set:
-            continue
-        r = result[sgid]
-        r["total"] += 1
-        criado = s["criado_em"]
-        if criado >= desde_hoje:
-            r["hoje"] += 1
-        elif criado >= desde_ontem and criado < ate_ontem:
-            r["ontem"] += 1
-        if criado >= desde_3d:
-            r["3dias"] += 1
-        if criado >= desde_7d:
-            r["7dias"] += 1
-    return result
+    try:
+        res = get_db().table("salas").select("guild_id,criado_em").eq("user_id", str(user_id)).execute()
+        for s in (res.data or []):
+            sgid = s.get("guild_id")
+            if sgid not in gid_set:
+                continue
+            r = result[sgid]
+            r["total"] += 1
+            criado = s["criado_em"] or ""
+            if criado >= desde_hoje:
+                r["hoje"] += 1
+            elif criado >= desde_ontem and criado < ate_ontem:
+                r["ontem"] += 1
+            if criado >= desde_3d:
+                r["3dias"] += 1
+            if criado >= desde_7d:
+                r["7dias"] += 1
+        return result
+    except Exception as e:
+        _log.error(f"[stats_usuario_por_guilds] {e}")
+        return result
+
 
 # ══════════════════════════════════════════════════════════════
-#  SERVIDOR (GUILD) — saldo de salas por servidor (agora no MongoDB)
+#  SERVIDOR (GUILD) — saldo de salas por servidor
 # ══════════════════════════════════════════════════════════════
 
 _guild_lock = Lock()
-_guild_cache = None
-_guild_dirty = False
 
-def _load_guild_cfg():
-    global _guild_cache
-    if _guild_cache is None:
-        try:
-            col = _col_guild()
-            _guild_cache = {}
-            for doc in col.find():
-                gid = doc.pop("_id")
-                _guild_cache[gid] = doc
-        except Exception:
-            _guild_cache = {}
-    return _guild_cache
-
-def _save_guild_cfg(data):
-    global _guild_cache, _guild_dirty
-    _guild_cache = data
-    _guild_dirty = True
-
-def _flush_guild():
-    global _guild_dirty
-    if not _guild_dirty or _guild_cache is None:
-        return
-    try:
-        col = _col_guild()
-        ops = []
-        for gid, doc_data in _guild_cache.items():
-            doc_copy = dict(doc_data)
-            doc_copy.pop("_id", None)
-            ops.append(UpdateOne({"_id": gid}, {"$set": doc_copy}, upsert=True))
-        if ops:
-            col.bulk_write(ops, ordered=False)
-        _guild_dirty = False
-    except Exception as e:
-        _log.error(f"[_flush_guild] Erro: {e}")
 
 def guild_config_get(guild_id: str) -> dict:
-    with _guild_lock:
-        data = _load_guild_cfg()
-        return data.get(guild_id, {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None, "canal_compras_id": None})
+    try:
+        res = get_db().table("guild_config").select("*").eq("id", str(guild_id)).maybe_single().execute()
+        if res.data:
+            return res.data
+    except Exception as e:
+        _log.error(f"[guild_config_get] {e}")
+    return {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None, "canal_compras_id": None}
+
 
 def guild_config_set(guild_id: str, cfg: dict):
     with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id not in data:
-            data[guild_id] = {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None}
-        data[guild_id].update(cfg)
-        _save_guild_cfg(data)
-        _flush_guild()
+        try:
+            existing = guild_config_get(guild_id)
+            merged = {**existing, **cfg, "id": str(guild_id)}
+            merged.pop("criado_em", None)
+            get_db().table("guild_config").upsert(merged).execute()
+        except Exception as e:
+            _log.error(f"[guild_config_set] {e}")
+
 
 def guild_adicionar_saldo(guild_id: str, quantidade: int, comprador_id: str = None):
     with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id not in data:
-            data[guild_id] = {"saldo": 0, "cargo_sala_id": None, "criado_por": comprador_id, "criado_em": _now()}
-        data[guild_id]["saldo"] = data[guild_id].get("saldo", 0) + quantidade
-        _save_guild_cfg(data)
-        _flush_guild()
-        return data[guild_id]["saldo"]
+        try:
+            cfg = guild_config_get(guild_id)
+            novo_saldo = int(cfg.get("saldo") or 0) + quantidade
+            dados = {"id": str(guild_id), "saldo": novo_saldo}
+            if not cfg.get("criado_por"):
+                dados["criado_por"] = comprador_id
+            get_db().table("guild_config").upsert(dados).execute()
+            return novo_saldo
+        except Exception as e:
+            _log.error(f"[guild_adicionar_saldo] {e}")
+            return 0
+
 
 def guild_consumir_sala(guild_id: str) -> bool:
     with _guild_lock:
-        data = _load_guild_cfg()
-        cfg = data.get(guild_id, {})
-        if cfg.get("saldo", 0) <= 0:
+        try:
+            cfg = guild_config_get(guild_id)
+            if int(cfg.get("saldo") or 0) <= 0:
+                return False
+            novo_saldo = int(cfg.get("saldo") or 0) - 1
+            get_db().table("guild_config").update({"saldo": novo_saldo}).eq("id", str(guild_id)).execute()
+            return True
+        except Exception as e:
+            _log.error(f"[guild_consumir_sala] {e}")
             return False
-        cfg["saldo"] -= 1
-        data[guild_id] = cfg
-        _save_guild_cfg(data)
-        _flush_guild()
-        return True
+
 
 def guild_reverter_sala(guild_id: str):
     with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id in data:
-            data[guild_id]["saldo"] = data[guild_id].get("saldo", 0) + 1
-            _save_guild_cfg(data)
-            _flush_guild()
+        try:
+            cfg = guild_config_get(guild_id)
+            novo_saldo = int(cfg.get("saldo") or 0) + 1
+            get_db().table("guild_config").update({"saldo": novo_saldo}).eq("id", str(guild_id)).execute()
+        except Exception as e:
+            _log.error(f"[guild_reverter_sala] {e}")
+
 
 def guild_set_cargo_sala(guild_id: str, cargo_id: int):
-    with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id not in data:
-            data[guild_id] = {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None}
-        data[guild_id]["cargo_sala_id"] = cargo_id
-        _save_guild_cfg(data)
-        _flush_guild()
+    guild_config_set(str(guild_id), {"cargo_sala_id": cargo_id})
 
 
 def guild_set_cargo_cliente(guild_id: str, cargo_id):
-    """Define (ou remove com None) o cargo dado a todo comprador dessa guild."""
-    with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id not in data:
-            data[guild_id] = {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None}
-        data[guild_id]["cargo_cliente_id"] = cargo_id
-        _save_guild_cfg(data)
-        _flush_guild()
+    guild_config_set(str(guild_id), {"cargo_cliente_id": cargo_id})
 
 
 def guild_set_cargos_por_qtd(guild_id: str, cargos: dict):
-    """cargos = {str(qtd_minima): cargo_id}. Substitui a config inteira dessa guild."""
-    with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id not in data:
-            data[guild_id] = {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None}
-        data[guild_id]["cargos_por_qtd"] = cargos
-        _save_guild_cfg(data)
-        _flush_guild()
+    guild_config_set(str(guild_id), {"cargos_por_qtd": cargos})
 
 
 def guild_get_cargo_cliente(guild_id: str):
-    """Retorna cargo_cliente_id dessa guild (ou None)."""
     cfg = guild_config_get(guild_id)
     return cfg.get("cargo_cliente_id")
 
 
 def guild_get_cargos_por_qtd(guild_id: str) -> dict:
-    """Retorna dict {str(qtd): cargo_id} dessa guild."""
     cfg = guild_config_get(guild_id)
-    return cfg.get("cargos_por_qtd", {}) or {}
+    return cfg.get("cargos_por_qtd") or {}
 
 
-# ═══════════════════════════════════════════
-#  Canal de Avaliação — moderação estrita
-# ═══════════════════════════════════════════
 def guild_set_avaliacao(guild_id: str, canal_id=None, cargo_id=None, ativo=None):
-    """Atualiza config de avaliação (só campos enviados não-None)."""
-    with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id not in data:
-            data[guild_id] = {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None}
-        av = data[guild_id].get("avaliacao", {})
-        if canal_id is not None:
-            av["canal_id"] = canal_id
-        if cargo_id is not None:
-            av["cargo_id"] = cargo_id
-        if ativo is not None:
-            av["ativo"] = bool(ativo)
-        data[guild_id]["avaliacao"] = av
-        _save_guild_cfg(data)
-        _flush_guild()
+    cfg = guild_config_get(guild_id)
+    av = dict(cfg.get("avaliacao") or {})
+    if canal_id is not None:
+        av["canal_id"] = canal_id
+    if cargo_id is not None:
+        av["cargo_id"] = cargo_id
+    if ativo is not None:
+        av["ativo"] = bool(ativo)
+    guild_config_set(str(guild_id), {"avaliacao": av})
+    avaliacao_rebuild_cache()
 
 
 def guild_get_avaliacao(guild_id: str) -> dict:
     cfg = guild_config_get(guild_id)
-    av = cfg.get("avaliacao", {}) or {}
+    av = cfg.get("avaliacao") or {}
     return {
         "canal_id": av.get("canal_id"),
         "cargo_id": av.get("cargo_id"),
@@ -1354,61 +1352,52 @@ def guild_get_avaliacao(guild_id: str) -> dict:
     }
 
 
-# Cache dos canais de avaliação ATIVOS pra não ler disco em cada mensagem.
-# { canal_id: {"guild_id": str, "cargo_id": int} }
-_avaliacao_cache: dict[int, dict] = {}
+_avaliacao_cache: dict = {}
 _avaliacao_cache_loaded = False
 
 
 def avaliacao_rebuild_cache():
-    """Recarrega o cache de canais de avaliação ativos. Chamar após mudanças."""
     global _avaliacao_cache, _avaliacao_cache_loaded
     novo = {}
-    data = _load_guild_cfg()
-    for gid, cfg in data.items():
-        av = cfg.get("avaliacao") or {}
-        if av.get("ativo") and av.get("canal_id"):
-            novo[int(av["canal_id"])] = {
-                "guild_id": gid,
-                "cargo_id": av.get("cargo_id"),
-            }
+    try:
+        res = get_db().table("guild_config").select("id,avaliacao").execute()
+        for row in (res.data or []):
+            gid = row["id"]
+            av = row.get("avaliacao") or {}
+            if av.get("ativo") and av.get("canal_id"):
+                novo[int(av["canal_id"])] = {
+                    "guild_id": gid,
+                    "cargo_id": av.get("cargo_id"),
+                }
+    except Exception as e:
+        _log.error(f"[avaliacao_rebuild_cache] {e}")
     _avaliacao_cache = novo
     _avaliacao_cache_loaded = True
 
 
 def avaliacao_canal_info(canal_id: int) -> dict | None:
-    """Rápido — pra uso no on_message. Retorna info do canal se for de avaliação, senão None."""
     global _avaliacao_cache_loaded
     if not _avaliacao_cache_loaded:
         avaliacao_rebuild_cache()
     return _avaliacao_cache.get(canal_id)
 
 
-# ══════════════════════════════════════════════════════════════
-#  CANAL CHAT — só aceita comandos do bot (/, .)
-# ══════════════════════════════════════════════════════════════
-
 def guild_set_chat(guild_id: str, canal_id=None, cargo_id=None, ativo=None):
-    """Atualiza config do canal de chat (só comandos do bot)."""
-    with _guild_lock:
-        data = _load_guild_cfg()
-        if guild_id not in data:
-            data[guild_id] = {"saldo": 0, "cargo_sala_id": None, "criado_por": None, "criado_em": None}
-        ch = data[guild_id].get("chat_cmd", {})
-        if canal_id is not None:
-            ch["canal_id"] = canal_id
-        if cargo_id is not None:
-            ch["cargo_id"] = cargo_id
-        if ativo is not None:
-            ch["ativo"] = bool(ativo)
-        data[guild_id]["chat_cmd"] = ch
-        _save_guild_cfg(data)
-        _flush_guild()
+    cfg = guild_config_get(guild_id)
+    ch = dict(cfg.get("chat_cmd") or {})
+    if canal_id is not None:
+        ch["canal_id"] = canal_id
+    if cargo_id is not None:
+        ch["cargo_id"] = cargo_id
+    if ativo is not None:
+        ch["ativo"] = bool(ativo)
+    guild_config_set(str(guild_id), {"chat_cmd": ch})
+    chat_rebuild_cache()
 
 
 def guild_get_chat(guild_id: str) -> dict:
     cfg = guild_config_get(guild_id)
-    ch = cfg.get("chat_cmd", {}) or {}
+    ch = cfg.get("chat_cmd") or {}
     return {
         "canal_id": ch.get("canal_id"),
         "cargo_id": ch.get("cargo_id"),
@@ -1416,29 +1405,30 @@ def guild_get_chat(guild_id: str) -> dict:
     }
 
 
-# Cache dos canais de chat ATIVOS pra não ler disco em cada mensagem.
-_chat_cache: dict[int, dict] = {}
+_chat_cache: dict = {}
 _chat_cache_loaded = False
 
 
 def chat_rebuild_cache():
-    """Recarrega cache dos canais chat ativos."""
     global _chat_cache, _chat_cache_loaded
     novo = {}
-    data = _load_guild_cfg()
-    for gid, cfg in data.items():
-        ch = cfg.get("chat_cmd") or {}
-        if ch.get("ativo") and ch.get("canal_id"):
-            novo[int(ch["canal_id"])] = {
-                "guild_id": gid,
-                "cargo_id": ch.get("cargo_id"),
-            }
+    try:
+        res = get_db().table("guild_config").select("id,chat_cmd").execute()
+        for row in (res.data or []):
+            gid = row["id"]
+            ch = row.get("chat_cmd") or {}
+            if ch.get("ativo") and ch.get("canal_id"):
+                novo[int(ch["canal_id"])] = {
+                    "guild_id": gid,
+                    "cargo_id": ch.get("cargo_id"),
+                }
+    except Exception as e:
+        _log.error(f"[chat_rebuild_cache] {e}")
     _chat_cache = novo
     _chat_cache_loaded = True
 
 
 def chat_canal_info(canal_id: int) -> dict | None:
-    """Rápido — pra uso no on_message. Retorna info se canal estiver na lista, senão None."""
     global _chat_cache_loaded
     if not _chat_cache_loaded:
         chat_rebuild_cache()
@@ -1446,14 +1436,14 @@ def chat_canal_info(canal_id: int) -> dict | None:
 
 
 # ══════════════════════════════════════════════════════════════
-#  SISTEMA DE BÔNUS — a cada 10 salas compradas = 1 sala grátis
+#  SISTEMA DE BÔNUS
 # ══════════════════════════════════════════════════════════════
 
-BONUS_RATIO    = 10  # padrão (substituído pelo botconfig em runtime)
-BONUS_POR_CICLO = 2  # padrão
+BONUS_RATIO    = 10
+BONUS_POR_CICLO = 2
 
-def get_bonus_config() -> tuple[int, int]:
-    """Retorna (ratio, por_ciclo) lidos do botconfig (MongoDB). Fallback nos defaults."""
+
+def get_bonus_config() -> tuple:
     try:
         cfg = botconfig_load()
         ratio     = int(cfg.get("bonus_ratio",     BONUS_RATIO))
@@ -1462,76 +1452,45 @@ def get_bonus_config() -> tuple[int, int]:
     except Exception:
         return BONUS_RATIO, BONUS_POR_CICLO
 
-_bonus_cache = None
-_bonus_dirty = False
-
-def _load_bonus():
-    global _bonus_cache
-    if _bonus_cache is None:
-        try:
-            col = _col_bonus()
-            _bonus_cache = {}
-            for doc in col.find():
-                uid = doc.pop("_id")
-                _bonus_cache[uid] = doc
-        except Exception:
-            _bonus_cache = {}
-    return _bonus_cache
-
-def _save_bonus(data):
-    global _bonus_cache, _bonus_dirty
-    _bonus_cache = data
-    _bonus_dirty = True
-
-def _flush_bonus():
-    global _bonus_dirty
-    if not _bonus_dirty or _bonus_cache is None:
-        return
-    try:
-        col = _col_bonus()
-        ops = []
-        for uid, doc_data in _bonus_cache.items():
-            doc_copy = dict(doc_data)
-            doc_copy.pop("_id", None)
-            ops.append(UpdateOne({"_id": uid}, {"$set": doc_copy}, upsert=True))
-        if ops:
-            col.bulk_write(ops, ordered=False)
-        _bonus_dirty = False
-    except Exception as e:
-        _log.error(f"[_flush_bonus] Erro: {e}")
 
 def _calcular_bonus(salas_compradas: int) -> int:
-    """A cada N salas compradas = X bônus (lido do botconfig)."""
     ratio, por_ciclo = get_bonus_config()
     return (salas_compradas // ratio) * por_ciclo
 
+
 def bonus_registrar_compra(user_id: str, user_nome: str, salas_compradas: int):
-    data = _load_bonus()
-    if user_id not in data:
-        data[user_id] = {
+    try:
+        res = get_db().table("bonus_data").select("*").eq("user_id", str(user_id)).maybe_single().execute()
+        reg = res.data or {
+            "user_id": str(user_id),
             "user_nome": user_nome,
             "total_comprado": 0,
             "bonus_resgatado": 0,
             "historico": [],
         }
-    reg = data[user_id]
-    reg["user_nome"] = user_nome
-    reg["total_comprado"] += salas_compradas
-    reg["historico"].append({
-        "salas": salas_compradas,
-        "data": _now(),
-    })
-    if len(reg["historico"]) > 50:
-        reg["historico"] = reg["historico"][-50:]
-    _save_bonus(data)
-    _flush_bonus()
-    return reg
+        reg["user_nome"] = user_nome
+        reg["total_comprado"] = int(reg.get("total_comprado") or 0) + salas_compradas
+        historico = list(reg.get("historico") or [])
+        historico.append({"salas": salas_compradas, "data": _now()})
+        if len(historico) > 50:
+            historico = historico[-50:]
+        reg["historico"] = historico
+        get_db().table("bonus_data").upsert(reg).execute()
+        return reg
+    except Exception as e:
+        _log.error(f"[bonus_registrar_compra] {e}")
+        return {}
+
 
 def bonus_info(user_id: str) -> dict:
-    data = _load_bonus()
-    reg = data.get(user_id, {"total_comprado": 0, "bonus_resgatado": 0})
-    total = reg.get("total_comprado", 0)
-    resgatado = reg.get("bonus_resgatado", 0)
+    try:
+        res = get_db().table("bonus_data").select("total_comprado,bonus_resgatado").eq("user_id", str(user_id)).maybe_single().execute()
+        reg = res.data or {"total_comprado": 0, "bonus_resgatado": 0}
+    except Exception:
+        reg = {"total_comprado": 0, "bonus_resgatado": 0}
+
+    total = int(reg.get("total_comprado") or 0)
+    resgatado = int(reg.get("bonus_resgatado") or 0)
     ratio, por_ciclo = get_bonus_config()
 
     bonus_total = _calcular_bonus(total)
@@ -1551,126 +1510,124 @@ def bonus_info(user_id: str) -> dict:
         "falta_proximo":   falta,
     }
 
-def bonus_resgatar(user_id: str, user_nome: str) -> tuple[bool, int, str]:
-    data = _load_bonus()
-    reg = data.get(user_id)
-    if not reg or reg.get("total_comprado", 0) == 0:
-        return False, 0, "Você ainda não comprou salas suficientes para ter bônus."
 
-    total = reg["total_comprado"]
-    resgatado = reg.get("bonus_resgatado", 0)
-    bonus_total = _calcular_bonus(total)
-    disponivel = max(0, bonus_total - resgatado)
+def bonus_resgatar(user_id: str, user_nome: str) -> tuple:
+    try:
+        res = get_db().table("bonus_data").select("*").eq("user_id", str(user_id)).maybe_single().execute()
+        reg = res.data
+        if not reg or int(reg.get("total_comprado") or 0) == 0:
+            return False, 0, "Você ainda não comprou salas suficientes para ter bônus."
 
-    if disponivel <= 0:
-        return False, 0, "Sem bônus disponível no momento. Continue comprando para acumular!"
+        total = int(reg["total_comprado"])
+        resgatado = int(reg.get("bonus_resgatado") or 0)
+        bonus_total = _calcular_bonus(total)
+        disponivel = max(0, bonus_total - resgatado)
 
-    code = adicionar_saldo_usuario(user_id, user_nome, disponivel)
+        if disponivel <= 0:
+            return False, 0, "Sem bônus disponível no momento. Continue comprando para acumular!"
 
-    reg["bonus_resgatado"] = resgatado + disponivel
-    _save_bonus(data)
-    _flush_bonus()
+        code = adicionar_saldo_usuario(user_id, user_nome, disponivel)
+        get_db().table("bonus_data").update({
+            "bonus_resgatado": resgatado + disponivel
+        }).eq("user_id", str(user_id)).execute()
 
-    return True, disponivel, code
+        return True, disponivel, code
+    except Exception as e:
+        _log.error(f"[bonus_resgatar] {e}")
+        return False, 0, "Erro interno."
 
-def bonus_resetar(user_id: str) -> tuple[bool, str]:
-    data = _load_bonus()
-    reg = data.get(user_id)
-    if not reg or reg.get("total_comprado", 0) == 0:
-        return False, "Você não tem dados de bônus para resetar."
 
-    total = reg["total_comprado"]
-    resgatado = reg.get("bonus_resgatado", 0)
-    bonus_total = _calcular_bonus(total)
-    disponivel = max(0, bonus_total - resgatado)
+def bonus_resetar(user_id: str) -> tuple:
+    try:
+        res = get_db().table("bonus_data").select("*").eq("user_id", str(user_id)).maybe_single().execute()
+        reg = res.data
+        if not reg or int(reg.get("total_comprado") or 0) == 0:
+            return False, "Você não tem dados de bônus para resetar."
 
-    if disponivel > 0:
-        return False, f"Você tem **{disponivel} sala(s) bônus** pendentes. Resgate antes de resetar!"
+        total = int(reg["total_comprado"])
+        resgatado = int(reg.get("bonus_resgatado") or 0)
+        bonus_total = _calcular_bonus(total)
+        disponivel = max(0, bonus_total - resgatado)
 
-    reg["total_comprado"] = 0
-    reg["bonus_resgatado"] = 0
-    reg["historico"] = []
-    _save_bonus(data)
-    _flush_bonus()
+        if disponivel > 0:
+            return False, f"Você tem **{disponivel} sala(s) bônus** pendentes. Resgate antes de resetar!"
 
-    return True, f"Faixa resetada! Seu contador voltou a **0**. Compre mais salas para acumular bônus novamente!"
+        get_db().table("bonus_data").update({
+            "total_comprado": 0,
+            "bonus_resgatado": 0,
+            "historico": [],
+        }).eq("user_id", str(user_id)).execute()
+
+        return True, "Faixa resetada! Seu contador voltou a **0**. Compre mais salas para acumular bônus novamente!"
+    except Exception as e:
+        _log.error(f"[bonus_resetar] {e}")
+        return False, "Erro interno."
 
 
 # ══════════════════════════════════════════════════════════════
-#  METAS — meta de criação de salas por usuário
+#  METAS
 # ══════════════════════════════════════════════════════════════
-
-def _col_metas():
-    return _get_db()["metas"]
 
 def meta_get(user_id: str) -> dict | None:
-    """Retorna a meta ativa do usuário ou None."""
     try:
-        doc = _col_metas().find_one({"_id": str(user_id)})
-        if doc:
-            doc.pop("_id", None)
-            return doc
+        res = get_db().table("metas").select("*").eq("user_id", str(user_id)).maybe_single().execute()
+        return res.data
     except Exception as e:
         _log.warning(f"[meta_get] {e}")
-    return None
+        return None
+
 
 def meta_set(user_id: str, alvo: int, dias: int):
-    """Cria/atualiza a meta do usuário. Marca salas_inicio = total de salas atual
-    para que o progresso conte a partir de agora."""
     try:
-        # Snapshot do total atual de salas criadas pelo usuário
-        salas = _load("salas")
-        total_atual = sum(1 for s in salas.values() if s.get("user_id") == str(user_id))
+        res = get_db().table("salas").select("id").eq("user_id", str(user_id)).execute()
+        total_atual = len(res.data or [])
         agora = datetime.now(BRASILIA)
         fim = agora + timedelta(days=dias)
         doc = {
+            "user_id": str(user_id),
             "alvo": int(alvo),
             "dias": int(dias),
             "salas_inicio": total_atual,
             "criado_em": agora.isoformat(),
             "expira_em": fim.isoformat(),
         }
-        _col_metas().update_one({"_id": str(user_id)}, {"$set": doc}, upsert=True)
+        get_db().table("metas").upsert(doc).execute()
         return doc
     except Exception as e:
         _log.error(f"[meta_set] {e}")
         return None
 
+
 def meta_delete(user_id: str) -> bool:
     try:
-        _col_metas().delete_one({"_id": str(user_id)})
+        get_db().table("metas").delete().eq("user_id", str(user_id)).execute()
         return True
     except Exception as e:
         _log.warning(f"[meta_delete] {e}")
         return False
 
+
 def meta_progresso(user_id: str) -> dict | None:
-    """Calcula o progresso da meta do usuário.
-    Retorna None se não tiver meta ativa.
-    """
     meta = meta_get(user_id)
     if not meta:
         return None
     try:
-        salas = _load("salas")
-        total_atual = sum(1 for s in salas.values() if s.get("user_id") == str(user_id))
-        criadas = max(0, total_atual - int(meta.get("salas_inicio", 0)))
-        alvo = int(meta.get("alvo", 0))
+        res = get_db().table("salas").select("id").eq("user_id", str(user_id)).execute()
+        total_atual = len(res.data or [])
+        criadas = max(0, total_atual - int(meta.get("salas_inicio") or 0))
+        alvo = int(meta.get("alvo") or 0)
 
         agora = datetime.now(BRASILIA)
         criado_em = datetime.fromisoformat(meta["criado_em"])
         expira_em = datetime.fromisoformat(meta["expira_em"])
-        dias_total = max(1, int(meta.get("dias", 1)))
+        dias_total = max(1, int(meta.get("dias") or 1))
 
-        segs_total = (expira_em - criado_em).total_seconds()
         segs_passados = max(0, (agora - criado_em).total_seconds())
         segs_restantes = max(0, (expira_em - agora).total_seconds())
-
         dias_restantes = segs_restantes / 86400.0
         pct = (criadas / alvo * 100) if alvo > 0 else 0
         pct = min(100.0, max(0.0, pct))
 
-        # Média diária necessária pra completar no prazo
         falta = max(0, alvo - criadas)
         media_necessaria = (falta / dias_restantes) if dias_restantes > 0.01 else 0
         media_atual = (criadas / (segs_passados / 86400.0)) if segs_passados > 60 else 0
@@ -1697,51 +1654,52 @@ def meta_progresso(user_id: str) -> dict | None:
         return None
 
 
-# ═══════════════════════════════════════════════════════════════
-#  TOKEN MODE — usuário configura token da própria conta Discord
-# ═══════════════════════════════════════════════════════════════
-
-def _col_users_config():
-    return _get_db()["users_config"]
+# ══════════════════════════════════════════════════════════════
+#  TOKEN MODE
+# ══════════════════════════════════════════════════════════════
 
 def token_mode_get(user_id: str) -> dict:
-    """Retorna {'token': str|None, 'ativo': bool}"""
     try:
-        col = _col_users_config()
-        doc = col.find_one({"_id": str(user_id)}) or {}
+        res = get_db().table("users_config").select("user_token,token_mode_ativo").eq("user_id", str(user_id)).maybe_single().execute()
+        doc = res.data or {}
         return {"token": doc.get("user_token"), "ativo": bool(doc.get("token_mode_ativo", False))}
     except Exception as e:
         _log.error(f"[token_mode_get] {e}")
         return {"token": None, "ativo": False}
 
+
 def token_mode_set_token(user_id: str, token: str | None):
-    col = _col_users_config()
-    if token:
-        col.update_one({"_id": str(user_id)}, {"$set": {"user_token": token}}, upsert=True)
-    else:
-        col.update_one({"_id": str(user_id)}, {"$unset": {"user_token": ""}}, upsert=True)
+    try:
+        get_db().table("users_config").upsert({
+            "user_id": str(user_id), "user_token": token
+        }).execute()
+    except Exception as e:
+        _log.error(f"[token_mode_set_token] {e}")
+
 
 def token_mode_set_ativo(user_id: str, ativo: bool):
-    col = _col_users_config()
-    col.update_one({"_id": str(user_id)}, {"$set": {"token_mode_ativo": ativo}}, upsert=True)
-
-
-def token_mode_listar_todos() -> list[dict]:
-    """Retorna lista de todos os users com token configurado.
-    Cada item: {user_id, ativo, tem_token, servidores}.
-    """
     try:
-        col = _col_users_config()
-        docs = col.find({"user_token": {"$exists": True, "$ne": None}})
+        get_db().table("users_config").upsert({
+            "user_id": str(user_id), "token_mode_ativo": ativo
+        }).execute()
+    except Exception as e:
+        _log.error(f"[token_mode_set_ativo] {e}")
+
+
+def token_mode_listar_todos() -> list:
+    try:
+        res = (get_db().table("users_config").select("user_id,user_token,token_mode_ativo,token_mode_servidores")
+               .not_.is_("user_token", "null")
+               .execute())
         out = []
-        for d in docs:
-            uid = d.get("_id")
+        for d in (res.data or []):
+            uid = d.get("user_id")
             if not uid:
                 continue
             out.append({
-                "user_id": str(uid),
-                "tem_token": bool(d.get("user_token")),
-                "ativo": bool(d.get("token_mode_ativo", False)),
+                "user_id":    str(uid),
+                "tem_token":  bool(d.get("user_token")),
+                "ativo":      bool(d.get("token_mode_ativo", False)),
                 "servidores": [str(s) for s in (d.get("token_mode_servidores") or [])],
             })
         return out
@@ -1750,44 +1708,34 @@ def token_mode_listar_todos() -> list[dict]:
         return []
 
 
-def token_mode_servidores_get(user_id: str) -> list[str]:
-    """Retorna lista de guild_ids (str) que este user atende com token mode."""
+def token_mode_servidores_get(user_id: str) -> list:
     try:
-        col = _col_users_config()
-        doc = col.find_one({"_id": str(user_id)}) or {}
-        return [str(s) for s in (doc.get("token_mode_servidores") or [])]
+        res = get_db().table("users_config").select("token_mode_servidores").eq("user_id", str(user_id)).maybe_single().execute()
+        if res.data:
+            return [str(s) for s in (res.data.get("token_mode_servidores") or [])]
     except Exception as e:
         _log.error(f"[token_mode_servidores_get] {e}")
-        return []
+    return []
 
 
-def token_mode_servidores_set(user_id: str, servidores: list[str]):
-    """Define a lista de guild_ids que este user atende."""
+def token_mode_servidores_set(user_id: str, servidores: list):
     try:
-        col = _col_users_config()
-        col.update_one(
-            {"_id": str(user_id)},
-            {"$set": {"token_mode_servidores": [str(s) for s in servidores]}},
-            upsert=True,
-        )
+        get_db().table("users_config").upsert({
+            "user_id": str(user_id),
+            "token_mode_servidores": [str(s) for s in servidores]
+        }).execute()
     except Exception as e:
         _log.error(f"[token_mode_servidores_set] {e}")
 
 
 def token_mode_servidor_add(user_id: str, guild_id: str) -> bool:
-    """Adiciona um guild_id à lista do user. Retorna True se adicionou."""
     try:
-        col = _col_users_config()
         atual = token_mode_servidores_get(user_id)
         gid = str(guild_id)
         if gid in atual:
             return False
         atual.append(gid)
-        col.update_one(
-            {"_id": str(user_id)},
-            {"$set": {"token_mode_servidores": atual}},
-            upsert=True,
-        )
+        token_mode_servidores_set(user_id, atual)
         return True
     except Exception as e:
         _log.error(f"[token_mode_servidor_add] {e}")
@@ -1795,19 +1743,13 @@ def token_mode_servidor_add(user_id: str, guild_id: str) -> bool:
 
 
 def token_mode_servidor_remove(user_id: str, guild_id: str) -> bool:
-    """Remove um guild_id da lista do user. Retorna True se removeu."""
     try:
-        col = _col_users_config()
         atual = token_mode_servidores_get(user_id)
         gid = str(guild_id)
         if gid not in atual:
             return False
         atual.remove(gid)
-        col.update_one(
-            {"_id": str(user_id)},
-            {"$set": {"token_mode_servidores": atual}},
-            upsert=True,
-        )
+        token_mode_servidores_set(user_id, atual)
         return True
     except Exception as e:
         _log.error(f"[token_mode_servidor_remove] {e}")
@@ -1815,169 +1757,135 @@ def token_mode_servidor_remove(user_id: str, guild_id: str) -> bool:
 
 
 def token_mode_dono_do_servidor(guild_id: str) -> str | None:
-    """Retorna o user_id que tem o servidor cadastrado com token mode ativo.
-    Se múltiplos users tiverem o mesmo servidor, retorna o primeiro.
-    """
     try:
-        col = _col_users_config()
-        doc = col.find_one({
-            "token_mode_servidores": str(guild_id),
-            "token_mode_ativo": True,
-            "user_token": {"$exists": True, "$ne": None},
-        })
-        return str(doc["_id"]) if doc else None
+        res = get_db().table("users_config").select("user_id,token_mode_servidores,token_mode_ativo,user_token").eq("token_mode_ativo", True).execute()
+        gid = str(guild_id)
+        for d in (res.data or []):
+            if not d.get("user_token"):
+                continue
+            servs = [str(s) for s in (d.get("token_mode_servidores") or [])]
+            if gid in servs:
+                return str(d["user_id"])
     except Exception as e:
         _log.error(f"[token_mode_dono_do_servidor] {e}")
-        return None
+    return None
 
 
-# ──── SISTEMA DE CONVITES ─────────────────────────────────────
-# Coleção: invites_system
-# - {_id: "invite:CODE", inviter_id, guild_id, criado_em}
-# - {_id: "convidado:USER_ID:GUILD_ID", inviter_id, codigo, joined_em, aprovado, valido}
-
-def _col_convites():
-    return _get_db()["invites_system"]
-
+# ══════════════════════════════════════════════════════════════
+#  SISTEMA DE CONVITES
+# ══════════════════════════════════════════════════════════════
 
 def convite_link_get(inviter_id: str, guild_id: str) -> str | None:
-    """Retorna o código de convite salvo desse user nessa guild."""
     try:
-        doc = _col_convites().find_one({
-            "tipo": "invite",
-            "inviter_id": str(inviter_id),
-            "guild_id": str(guild_id),
-        })
-        return doc.get("codigo") if doc else None
+        doc_id = f"invite:{guild_id}:{inviter_id}"
+        res = get_db().table("invites_system").select("codigo").eq("id", doc_id).maybe_single().execute()
+        return (res.data or {}).get("codigo")
     except Exception as e:
         _log.error(f"[convite_link_get] {e}")
         return None
 
 
 def convite_link_set(inviter_id: str, guild_id: str, codigo: str):
-    """Salva o código de convite criado pelo bot pra esse user nessa guild."""
     try:
-        _col_convites().update_one(
-            {"_id": f"invite:{guild_id}:{inviter_id}"},
-            {"$set": {
-                "tipo": "invite",
-                "inviter_id": str(inviter_id),
-                "guild_id": str(guild_id),
-                "codigo": str(codigo),
-                "criado_em": datetime.now(BRASILIA).isoformat(),
-            }},
-            upsert=True,
-        )
+        doc_id = f"invite:{guild_id}:{inviter_id}"
+        get_db().table("invites_system").upsert({
+            "id": doc_id,
+            "tipo": "invite",
+            "inviter_id": str(inviter_id),
+            "guild_id": str(guild_id),
+            "codigo": str(codigo),
+            "criado_em": datetime.now(BRASILIA).isoformat(),
+        }).execute()
     except Exception as e:
         _log.error(f"[convite_link_set] {e}")
 
 
 def convidados_resolve_inviter(codigo: str, guild_id: str) -> str | None:
-    """Dado um código de invite, retorna o inviter_id."""
     try:
-        doc = _col_convites().find_one({
-            "tipo": "invite",
-            "codigo": str(codigo),
-            "guild_id": str(guild_id),
-        })
-        return doc.get("inviter_id") if doc else None
+        res = (get_db().table("invites_system").select("inviter_id")
+               .eq("tipo", "invite")
+               .eq("codigo", str(codigo))
+               .eq("guild_id", str(guild_id))
+               .maybe_single()
+               .execute())
+        return (res.data or {}).get("inviter_id")
     except Exception as e:
         _log.error(f"[convidados_resolve_inviter] {e}")
         return None
 
 
 def convidado_registrar(user_id: str, guild_id: str, inviter_id: str, codigo: str, valido: bool, motivo: str = ""):
-    """Registra um convidado que entrou.
-
-    Se o user já entrou alguma vez via QUALQUER convite (mesmo que tenha saído),
-    o novo registro fica como inválido com motivo='reentrou'. Isso impede que
-    o inviter ganhe salas convidando a mesma pessoa que saiu e voltou.
-    """
     try:
-        col = _col_convites()
         doc_id = f"convidado:{guild_id}:{user_id}"
-        existente = col.find_one({"_id": doc_id})
+        res = get_db().table("invites_system").select("id").eq("id", doc_id).maybe_single().execute()
         agora = datetime.now(BRASILIA).isoformat()
 
-        if existente:
-            # Já entrou antes — invalida re-entrada e mantém histórico
-            col.update_one(
-                {"_id": doc_id},
-                {"$set": {
-                    "valido": False,
-                    "motivo": "reentrou",
-                    "saiu": False,  # voltou pro server
-                    "rejoined_em": agora,
-                    # Mantém inviter_id e codigo originais (não sobrescreve)
-                    # Mantém aprovado se já tinha sido aprovado antes
-                }},
-            )
+        if res.data:
+            get_db().table("invites_system").update({
+                "valido": False,
+                "motivo": "reentrou",
+                "saiu": False,
+                "rejoined_em": agora,
+            }).eq("id", doc_id).execute()
             return
 
-        # Primeira vez do user — registro normal
-        col.update_one(
-            {"_id": doc_id},
-            {"$set": {
-                "tipo": "convidado",
-                "user_id": str(user_id),
-                "guild_id": str(guild_id),
-                "inviter_id": str(inviter_id),
-                "codigo": str(codigo),
-                "joined_em": agora,
-                "valido": bool(valido),
-                "motivo": str(motivo),
-                "aprovado": False,
-                "saiu": False,
-            }},
-            upsert=True,
-        )
+        get_db().table("invites_system").upsert({
+            "id": doc_id,
+            "tipo": "convidado",
+            "user_id": str(user_id),
+            "guild_id": str(guild_id),
+            "inviter_id": str(inviter_id),
+            "codigo": str(codigo),
+            "joined_em": agora,
+            "valido": bool(valido),
+            "motivo": str(motivo),
+            "aprovado": False,
+            "saiu": False,
+        }).execute()
     except Exception as e:
         _log.error(f"[convidado_registrar] {e}")
 
 
 def convidado_marcar_saiu(user_id: str, guild_id: str):
-    """Marca convidado como saído (invalida)."""
     try:
-        _col_convites().update_one(
-            {"_id": f"convidado:{guild_id}:{user_id}"},
-            {"$set": {"saiu": True, "valido": False, "motivo_saida": "saiu_do_servidor"}},
-        )
+        doc_id = f"convidado:{guild_id}:{user_id}"
+        get_db().table("invites_system").update({
+            "saiu": True, "valido": False, "motivo_saida": "saiu_do_servidor"
+        }).eq("id", doc_id).execute()
     except Exception as e:
         _log.error(f"[convidado_marcar_saiu] {e}")
 
 
-def convidados_validos_24h(inviter_id: str, guild_id: str) -> list[dict]:
-    """Lista convidados válidos (passou nos filtros, não saiu, não aprovado) das últimas 24h."""
+def convidados_validos_24h(inviter_id: str, guild_id: str) -> list:
     try:
         limite = (datetime.now(BRASILIA) - timedelta(hours=24)).isoformat()
-        docs = _col_convites().find({
-            "tipo": "convidado",
-            "inviter_id": str(inviter_id),
-            "guild_id": str(guild_id),
-            "valido": True,
-            "saiu": False,
-            "aprovado": False,
-            "joined_em": {"$gte": limite},
-        })
-        return list(docs)
+        res = (get_db().table("invites_system").select("*")
+               .eq("tipo", "convidado")
+               .eq("inviter_id", str(inviter_id))
+               .eq("guild_id", str(guild_id))
+               .eq("valido", True)
+               .eq("saiu", False)
+               .eq("aprovado", False)
+               .gte("joined_em", limite)
+               .execute())
+        return res.data or []
     except Exception as e:
         _log.error(f"[convidados_validos_24h] {e}")
         return []
 
 
-def convidados_marcar_aprovados(inviter_id: str, guild_id: str, user_ids: list[str]):
-    """Marca convidados como aprovados (não contam mais nos validos_24h)."""
+def convidados_marcar_aprovados(inviter_id: str, guild_id: str, user_ids: list):
     try:
+        agora = datetime.now(BRASILIA).isoformat()
         for uid in user_ids:
-            _col_convites().update_one(
-                {"_id": f"convidado:{guild_id}:{uid}"},
-                {"$set": {"aprovado": True, "aprovado_em": datetime.now(BRASILIA).isoformat()}},
-            )
+            doc_id = f"convidado:{guild_id}:{uid}"
+            get_db().table("invites_system").update({
+                "aprovado": True, "aprovado_em": agora
+            }).eq("id", doc_id).execute()
     except Exception as e:
         _log.error(f"[convidados_marcar_aprovados] {e}")
 
 
-# Canal global de aprovação de convites
 def convites_canal_aprovacao_get() -> int | None:
     try:
         cfg = botconfig_load() or {}
@@ -2000,9 +1908,7 @@ def convites_canal_aprovacao_set(channel_id: int | None):
         _log.error(f"[convites_canal_aprovacao_set] {e}")
 
 
-# ── Canal de log do Token Mode (global, salvo no botconfig) ──
 def token_mode_log_channel_get() -> int | None:
-    """Retorna o channel_id do canal de log do Token Mode, ou None."""
     try:
         cfg = botconfig_load() or {}
         v = cfg.get("token_mode_log_channel")
@@ -2011,8 +1917,8 @@ def token_mode_log_channel_get() -> int | None:
         _log.error(f"[token_mode_log_channel_get] {e}")
         return None
 
+
 def token_mode_log_channel_set(channel_id: int | None):
-    """Define ou limpa o canal de log."""
     try:
         cfg = botconfig_load() or {}
         if channel_id:
@@ -2020,14 +1926,6 @@ def token_mode_log_channel_set(channel_id: int | None):
         else:
             cfg.pop("token_mode_log_channel", None)
         botconfig_save(cfg)
-        # Confirmação: relê do Mongo (ignorando cache)
-        try:
-            from pymongo import MongoClient  # noqa
-            doc = _col_botconfig().find_one({"_id": "main"}) or {}
-            persisted = doc.get("token_mode_log_channel")
-            _log.info(f"[token_mode_log_channel_set] solicitado={channel_id} persistido={persisted}")
-        except Exception as ex2:
-            _log.warning(f"[token_mode_log_channel_set verify] {ex2}")
     except Exception as e:
         _log.error(f"[token_mode_log_channel_set] {e}")
 
@@ -2037,39 +1935,33 @@ def token_mode_log_channel_set(channel_id: int | None):
 # ══════════════════════════════════════════════════════════════
 
 def _inicio_semana_db():
-    """Retorna segunda-feira 00:00 BRT desta semana (string ISO)."""
-    from datetime import datetime, timedelta
     agora = datetime.now(BRASILIA)
     seg   = agora - timedelta(days=agora.weekday())
     return seg.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
 
 def top_criadores_semana(limite: int = 10) -> list:
-    """Retorna os usuários que mais criaram salas nesta semana (segunda a agora).
-    Lista de dicts: {user_id, user_nome, total}  ordenada de maior pra menor.
-    """
     desde = _inicio_semana_db()
-    salas = _load("salas")
-    totais: dict = {}
-    for s in salas.values():
-        if s.get("criado_em", "") < desde:
-            continue
-        uid   = s.get("user_id", "?")
-        unome = s.get("user_nome") or "Desconhecido"
-        if uid not in totais:
-            totais[uid] = {"user_id": uid, "user_nome": unome, "total": 0}
-        totais[uid]["total"] += 1
-    result = sorted(totais.values(), key=lambda x: x["total"], reverse=True)
-    return result[:limite] if limite else result
+    try:
+        res = get_db().table("salas").select("user_id,user_nome,criado_em").gte("criado_em", desde).execute()
+        totais: dict = {}
+        for s in (res.data or []):
+            uid   = s.get("user_id", "?")
+            unome = s.get("user_nome") or "Desconhecido"
+            if uid not in totais:
+                totais[uid] = {"user_id": uid, "user_nome": unome, "total": 0}
+            totais[uid]["total"] += 1
+        result = sorted(totais.values(), key=lambda x: x["total"], reverse=True)
+        return result[:limite] if limite else result
+    except Exception as e:
+        _log.error(f"[top_criadores_semana] {e}")
+        return []
 
 
 _PREMIOS_TOP5 = [500, 400, 300, 200, 100]
 
 
 def distribuir_premios_ranking(top5: list) -> list:
-    """Distribui prêmios em salas (saldo) para os top 5.
-    Retorna lista de (user_id, user_nome, premio_salas).
-    """
     resultados = []
     for idx, u in enumerate(top5[:5]):
         premio = _PREMIOS_TOP5[idx]
@@ -2080,10 +1972,7 @@ def distribuir_premios_ranking(top5: list) -> list:
     return resultados
 
 
-# ── Config do ranking (salvo no botconfig) ────────────────────────────────
-
 def ranking_canal_anuncio_get() -> int | None:
-    """Retorna o canal onde o bot anuncia os vencedores semanais, ou None."""
     try:
         v = (botconfig_load() or {}).get("ranking_canal_anuncio")
         return int(v) if v else None
@@ -2093,7 +1982,6 @@ def ranking_canal_anuncio_get() -> int | None:
 
 
 def ranking_canal_anuncio_set(channel_id: int | None):
-    """Define ou limpa o canal de anúncio do ranking."""
     try:
         cfg = botconfig_load() or {}
         if channel_id:
@@ -2106,7 +1994,6 @@ def ranking_canal_anuncio_set(channel_id: int | None):
 
 
 def ranking_ativo_get() -> bool:
-    """Retorna True se o ranking semanal automático está ativo."""
     try:
         return bool((botconfig_load() or {}).get("ranking_ativo", True))
     except Exception as e:
@@ -2115,7 +2002,6 @@ def ranking_ativo_get() -> bool:
 
 
 def ranking_ativo_set(valor: bool):
-    """Ativa ou desativa o ranking semanal automático."""
     try:
         cfg = botconfig_load() or {}
         cfg["ranking_ativo"] = bool(valor)
@@ -2125,7 +2011,6 @@ def ranking_ativo_set(valor: bool):
 
 
 def ranking_ultimo_reset_get() -> str | None:
-    """Retorna o timestamp ISO do último reset semanal, ou None."""
     try:
         v = (botconfig_load() or {}).get("ranking_ultimo_reset")
         return str(v) if v else None
@@ -2135,7 +2020,6 @@ def ranking_ultimo_reset_get() -> str | None:
 
 
 def ranking_ultimo_reset_set(ts: str):
-    """Salva o timestamp do último reset semanal."""
     try:
         cfg = botconfig_load() or {}
         cfg["ranking_ultimo_reset"] = str(ts)
@@ -2144,40 +2028,26 @@ def ranking_ultimo_reset_set(ts: str):
         _log.error(f"[ranking_ultimo_reset_set] {e}")
 
 
-# ══════════════════════════════════════════════════════════════════
-#  PIX Credenciais por Guild (multi-tenant)
-#  Cada mediador (admin de guild) configura próprio token bancário.
-#  Estrutura salva dentro de guild_config[guild_id]["pix_creds"]:
-#  {
-#    "banco_ativo": "efi" | "mercadopago" | "pagbank" | "macrodroid",
-#    "efi":         { "client_id": "...", "client_secret": "...",
-#                     "cert_pem":  "<conteúdo do cert>", "ambiente": "producao" },
-#    "mercadopago": { "access_token": "..." },
-#    "pagbank":     { "token": "..." },
-#    "macrodroid":  { "site_url": "https://fmediador.discloud.app" },
-#  }
-# ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  PIX Credenciais por Guild
+# ══════════════════════════════════════════════════════════════
 
 def pix_creds_get(guild_id: str) -> dict:
-    """Retorna o dict de credenciais PIX da guild (vazio se não tem)."""
     cfg = guild_config_get(str(guild_id))
     return dict(cfg.get("pix_creds") or {})
 
 
 def pix_creds_set_banco(guild_id: str, banco: str, dados: dict):
-    """Salva credenciais de UM banco. banco: efi | mercadopago | pagbank | macrodroid"""
     if banco not in ("efi", "mercadopago", "pagbank", "macrodroid"):
         raise ValueError(f"banco inválido: {banco}")
     creds = pix_creds_get(guild_id)
     creds[banco] = dict(dados)
-    # Se ainda não tem banco_ativo, ativa esse automaticamente
     if not creds.get("banco_ativo"):
         creds["banco_ativo"] = banco
     guild_config_set(str(guild_id), {"pix_creds": creds})
 
 
 def pix_creds_set_ativo(guild_id: str, banco: str):
-    """Define qual banco está ativo (entre os já configurados)."""
     if banco not in ("efi", "mercadopago", "pagbank", "macrodroid"):
         raise ValueError(f"banco inválido: {banco}")
     creds = pix_creds_get(guild_id)
@@ -2188,17 +2058,14 @@ def pix_creds_set_ativo(guild_id: str, banco: str):
 
 
 def pix_creds_remove_banco(guild_id: str, banco: str):
-    """Remove um banco configurado da guild."""
     creds = pix_creds_get(guild_id)
     creds.pop(banco, None)
-    # Se removeu o ativo, desativa
     if creds.get("banco_ativo") == banco:
         creds.pop("banco_ativo", None)
     guild_config_set(str(guild_id), {"pix_creds": creds})
 
 
-def pix_creds_get_ativo(guild_id: str) -> tuple[str | None, dict]:
-    """Retorna (nome_banco_ativo, credenciais_desse_banco). (None, {}) se nada configurado."""
+def pix_creds_get_ativo(guild_id: str) -> tuple:
     creds = pix_creds_get(guild_id)
     banco = creds.get("banco_ativo")
     if not banco:
