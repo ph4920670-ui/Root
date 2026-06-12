@@ -2733,20 +2733,28 @@ class PainelFPrecoModal(discord.ui.Modal, title="Alterar Valor da Sala"):
                 ephemeral=True,
             )
 
-        await asyncio.to_thread(guild_config_set, self.guild_id, {"preco_sala": novo})
+        try:
+            await inter.response.defer(ephemeral=True)
+            await asyncio.to_thread(guild_config_set, self.guild_id, {"preco_sala": novo})
 
-        guild_obj = inter.client.get_guild(int(self.guild_id)) if self.guild_id.isdigit() else None
-        nome = guild_obj.name if guild_obj else self.guild_id
+            guild_obj = inter.client.get_guild(int(self.guild_id)) if str(self.guild_id).isdigit() else None
+            nome = guild_obj.name if guild_obj else str(self.guild_id)
 
-        em = _emb(f"{ON}  Preço Atualizado!", config.COR_SUCESSO)
-        em.description = (
-            f"Servidor: **{nome}**\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{MONEY} Novo preço: **R$ {novo:.2f}**/sala\n"
-            f"{DOT} 100 salas = R$ {novo * 100:.2f}\n"
-            f"{DOT} 300 salas = R$ {novo * 300:.2f}"
-        )
-        await inter.response.send_message(embed=em, ephemeral=True)
+            em = _emb(f"{ON}  Preço Atualizado!", config.COR_SUCESSO)
+            em.description = (
+                f"Servidor: **{nome}**\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"{MONEY} Novo preço: **R$ {novo:.2f}**/sala\n"
+                f"{DOT} 100 salas = R$ {novo * 100:.2f}\n"
+                f"{DOT} 300 salas = R$ {novo * 300:.2f}"
+            )
+            await inter.followup.send(embed=em, ephemeral=True)
+        except Exception as _ex:
+            _log.error(f"[PainelFPrecoModal] {_ex}", exc_info=True)
+            try:
+                await inter.followup.send(embed=_err("Erro ao salvar", f"`{_ex}`"), ephemeral=True)
+            except Exception:
+                pass
 
 
 class PainelFPrecoView(discord.ui.View):
