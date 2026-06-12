@@ -2848,11 +2848,21 @@ class ModCog(commands.Cog):
 
         await inter.response.defer(ephemeral=True)
 
-        guilds_data = []
-        for guild_obj in self.bot.guilds:
-            cfg = await asyncio.to_thread(guild_config_get, str(guild_obj.id))
-            guilds_data.append((guild_obj, cfg))
+        # Busca todos os guild_configs em uma única query
+        from utils.database import get_db
+        try:
+            all_cfgs_raw = await asyncio.to_thread(
+                lambda: get_db().table("guild_config").select("*").execute().data or []
+            )
+            cfg_map = {row["id"]: row for row in all_cfgs_raw}
+        except Exception:
+            cfg_map = {}
 
+        _empty = {"saldo": 0, "cargo_sala_id": None, "canal_compras_id": None}
+        guilds_data = [
+            (guild_obj, cfg_map.get(str(guild_obj.id), _empty))
+            for guild_obj in self.bot.guilds
+        ]
         guilds_data.sort(key=lambda x: x[0].member_count or 0, reverse=True)
 
         total_guilds = len(guilds_data)
