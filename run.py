@@ -37,6 +37,7 @@ COGS = [
     "cogs.ticket",
     "cogs.token_mode",
     "cogs.aposta_auto",
+    "cogs.migracao",
 ]
 
 
