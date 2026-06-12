@@ -17,6 +17,8 @@ from utils.database import (
     stats_guild,
 )
 
+import logging
+_log = logging.getLogger("salasff.dev")
 _BR = ZoneInfo("America/Sao_Paulo")
 
 def _ts():
@@ -331,9 +333,7 @@ class ValorSalaModal(discord.ui.Modal, title="Alterar Valor da Sala"):
     )
 
     async def on_submit(self, inter):
-        import json as _json
-        from utils.pix import _cfg_path
-        from utils.database import guild_config_set, _load_guild_cfg
+        from utils.database import botconfig_load, botconfig_save, get_db
         try:
             cts = int(self.centavos.value.strip())
             if cts <= 0: raise ValueError
@@ -344,33 +344,31 @@ class ValorSalaModal(discord.ui.Modal, title="Alterar Valor da Sala"):
                 ephemeral=True,
             )
 
-        # 1. Atualiza preço global
-        path = _cfg_path()
+        await inter.response.defer(ephemeral=True)
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = _json.load(f)
-        except Exception:
-            data = {}
-        data["preco_por_sala"] = novo
-        with open(path, "w", encoding="utf-8") as f:
-            _json.dump(data, f, ensure_ascii=False, indent=2)
+            # 1. Atualiza preço global no Supabase botconfig
+            cfg = await asyncio.to_thread(botconfig_load)
+            cfg["preco_por_sala"] = novo
+            await asyncio.to_thread(botconfig_save, cfg)
 
-        # 2. Limpa preco_sala individual de todos os servidores
-        count = 0
-        try:
-            all_cfg = _load_guild_cfg()
-            for gid, cfg in all_cfg.items():
-                if cfg.get("preco_sala") is not None:
-                    await asyncio.to_thread(guild_config_set, gid, {"preco_sala": None})
-                    count += 1
-        except Exception:
-            pass
+            # 2. Limpa preco_sala individual de todos os servidores
+            count = 0
+            try:
+                res = await asyncio.to_thread(
+                    lambda: get_db().table("guild_config").update({"preco_sala": None}).not_.is_("preco_sala", "null").execute()
+                )
+                count = len(res.data or [])
+            except Exception:
+                pass
 
-        em = _mod_emb(f"{ON}  Valor Global Atualizado!", config.COR_SUCESSO)
-        em.add_field(name=f"{DOLLAR}  Novo Preço", value=f"> **{cts} centavos** — R$ {novo:.2f} por sala", inline=False)
-        if count > 0:
-            em.add_field(name=f"{INFO}  Servidores", value=f"> Preço individual removido de **{count}** servidor(es)", inline=False)
-        await inter.response.send_message(embed=em, ephemeral=True)
+            em = _mod_emb(f"{ON}  Valor Global Atualizado!", config.COR_SUCESSO)
+            em.add_field(name=f"{DOLLAR}  Novo Preço", value=f"> **{cts} centavos** — R$ {novo:.2f} por sala", inline=False)
+            if count > 0:
+                em.add_field(name=f"{INFO}  Servidores", value=f"> Preço individual removido de **{count}** servidor(es)", inline=False)
+            await inter.followup.send(embed=em, ephemeral=True)
+        except Exception as _ex:
+            _log.error(f"[ValorSalaModal] {_ex}", exc_info=True)
+            await inter.followup.send(embed=_mod_emb("❌ Erro", config.COR_ERRO, f"`{_ex}`"), ephemeral=True)
 
 
 class ValorSalaServidorModal(discord.ui.Modal, title="Preço por Servidor"):
@@ -386,7 +384,7 @@ class ValorSalaServidorModal(discord.ui.Modal, title="Preço por Servidor"):
     )
 
     async def on_submit(self, inter):
-        from utils.database import guild_config_set, guild_config_get
+        from utils.database import guild_config_set
         try:
             gid = self.guild_id.value.strip()
             cts = int(self.centavos.value.strip())
@@ -398,20 +396,19 @@ class ValorSalaServidorModal(discord.ui.Modal, title="Preço por Servidor"):
                 ephemeral=True,
             )
 
-        await asyncio.to_thread(guild_config_set, gid, {"preco_sala": novo})
-
-        guild_obj = inter.client.get_guild(int(gid)) if gid.isdigit() else None
-        nome = guild_obj.name if guild_obj else f"Servidor `{gid}`"
-
-        em = _mod_emb(f"{ON}  Preço do Servidor Atualizado!", config.COR_SUCESSO)
-        em.add_field(name=f"{INFO}  Servidor", value=f"> {nome}", inline=False)
-        em.add_field(name=f"{DOLLAR}  Novo Preço", value=f"> **{cts} centavos** — R$ {novo:.2f} por sala", inline=False)
-        em.add_field(
-            name=f"{SETTINGS}  Observação",
-            value=f"> Este preço sobrepõe o global apenas para este servidor.",
-            inline=False,
-        )
-        await inter.response.send_message(embed=em, ephemeral=True)
+        await inter.response.defer(ephemeral=True)
+        try:
+            await asyncio.to_thread(guild_config_set, gid, {"preco_sala": novo})
+            guild_obj = inter.client.get_guild(int(gid)) if gid.isdigit() else None
+            nome = guild_obj.name if guild_obj else f"Servidor `{gid}`"
+            em = _mod_emb(f"{ON}  Preço do Servidor Atualizado!", config.COR_SUCESSO)
+            em.add_field(name=f"{INFO}  Servidor", value=f"> {nome}", inline=False)
+            em.add_field(name=f"{DOLLAR}  Novo Preço", value=f"> **{cts} centavos** — R$ {novo:.2f} por sala", inline=False)
+            em.add_field(name=f"{SETTINGS}  Observação", value=f"> Este preço sobrepõe o global apenas para este servidor.", inline=False)
+            await inter.followup.send(embed=em, ephemeral=True)
+        except Exception as _ex:
+            _log.error(f"[ValorSalaServidorModal] {_ex}", exc_info=True)
+            await inter.followup.send(embed=_mod_emb("❌ Erro", config.COR_ERRO, f"`{_ex}`"), ephemeral=True)
 
 
 # ═══════════════════════════════════════════
