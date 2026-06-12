@@ -200,6 +200,46 @@ def _migrar_sync() -> dict:
     else:
         resultado["metas"] = 0
 
+    # ── USERS CONFIG (token mode) ──
+    rows = []
+    if "users_config" in mdb.list_collection_names():
+        for doc in mdb["users_config"].find():
+            uid = str(doc.get("user_id") or doc["_id"])
+            rows.append({
+                "user_id":               uid,
+                "user_token":            doc.get("user_token"),
+                "token_mode_ativo":      bool(doc.get("token_mode_ativo", False)),
+                "token_mode_servidores": doc.get("token_mode_servidores", []),
+            })
+        resultado["users_config"] = _upsert("users_config", rows, conflict="user_id")
+    else:
+        resultado["users_config"] = 0
+
+    # ── INVITES SYSTEM ──
+    rows = []
+    for col_name in ("invites_system", "invites", "convites"):
+        if col_name in mdb.list_collection_names():
+            for doc in mdb[col_name].find():
+                rows.append({
+                    "id":           str(doc.get("id") or doc["_id"]),
+                    "tipo":         doc.get("tipo"),
+                    "inviter_id":   doc.get("inviter_id"),
+                    "guild_id":     doc.get("guild_id"),
+                    "user_id":      doc.get("user_id"),
+                    "codigo":       doc.get("codigo"),
+                    "joined_em":    _ts(doc.get("joined_em")),
+                    "valido":       bool(doc.get("valido", True)),
+                    "motivo":       doc.get("motivo"),
+                    "aprovado":     bool(doc.get("aprovado", False)),
+                    "aprovado_em":  _ts(doc.get("aprovado_em")),
+                    "saiu":         bool(doc.get("saiu", False)),
+                    "motivo_saida": doc.get("motivo_saida"),
+                    "rejoined_em":  _ts(doc.get("rejoined_em")),
+                    "criado_em":    _ts(doc.get("criado_em")),
+                })
+            break
+    resultado["invites_system"] = _upsert("invites_system", rows) if rows else 0
+
     mongo.close()
     return resultado
 
