@@ -81,6 +81,20 @@ def create_bot() -> commands.Bot:
                 _log.info(f"[Bot] Cog carregado: {cog}")
             except Exception as e:
                 _log.error(f"[Bot] Erro ao carregar {cog}: {e}")
+        # Sincroniza slash commands nos servidores owner
+        for guild_id in config.OWNER_GUILD_IDS:
+            try:
+                guild = discord.Object(id=guild_id)
+                synced = await bot.tree.sync(guild=guild)
+                _log.info(f"[Bot] Sincronizados {len(synced)} comandos na guild {guild_id}")
+            except Exception as e:
+                _log.error(f"[Bot] Erro ao sincronizar guild {guild_id}: {e}")
+        # Sincroniza comandos globais também
+        try:
+            synced = await bot.tree.sync()
+            _log.info(f"[Bot] Sincronizados {len(synced)} comandos globais")
+        except Exception as e:
+            _log.error(f"[Bot] Erro ao sincronizar comandos globais: {e}")
 
     bot.setup_hook = setup_hook_impl
     return bot
