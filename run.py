@@ -48,7 +48,7 @@ def create_bot() -> commands.Bot:
     intents.guilds      = True
 
     bot = commands.Bot(
-        command_prefix=".",
+        command_prefix=[".", "+"],
         intents=intents,
         help_command=None,
     )

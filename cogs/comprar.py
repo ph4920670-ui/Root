@@ -33,7 +33,7 @@ class ComprarModal(discord.ui.Modal, title="🛒 Comprar Salas"):
         super().__init__()
         self.guild_id = guild_id
         preco = get_preco_por_sala_guild(guild_id)
-        self.quantia = discord.ui.TextInput(label=f"Quantidade de salas  (R$ {preco:.2f}/sala)", placeholder="Mínimo 12 salas", min_length=1, max_length=5)
+        self.quantia = discord.ui.TextInput(label=f"Quantidade de salas  (R$ {preco:.2f}/sala)", placeholder="Mínimo 30 salas", min_length=1, max_length=5)
         self.add_item(self.quantia)
 
     async def on_submit(self, i):
@@ -49,8 +49,8 @@ class ComprarModal(discord.ui.Modal, title="🛒 Comprar Salas"):
         except ValueError:
             return await i.followup.send(embed=_err("Quantidade inválida."), ephemeral=True)
 
-        if qtd < 12:
-            return await i.followup.send(embed=_err("Mínimo 12 salas", f"{DOT} A quantidade mínima para compra é **12 salas**."), ephemeral=True)
+        if qtd < 30:
+            return await i.followup.send(embed=_err("Mínimo 30 salas", f"{DOT} A quantidade mínima para compra é **30 salas**."), ephemeral=True)
 
         gid = self.guild_id or (str(i.guild.id) if i.guild else None)
         preco = get_preco_por_sala_guild(gid)
@@ -147,7 +147,7 @@ class PainelComprarView(discord.ui.View):
             "flags": 64 | 32768,
             "components": [{"id": 1, "type": 17, "components": [
                 {"id": 2, "type": 10, "content": f"## {_emoji_str('store')} Perfil de {alvo.mention}"},
-                _sec(3,  f"**Comprar Salas**\nR$ {preco:.2f} por sala — mínimo 12 salas",
+                _sec(3,  f"**Comprar Salas**\nR$ {preco:.2f} por sala — mínimo 30 salas",
                          _btn(5,  "Comprar Salas", "cw:comprar", style=3, emoji=_emj("carteira"))),
                 _sec(6,  "**Outros**\nVer lucro, config GO, bônus e histórico.",
                          _btn(8,  "Outros",        "cw:outros",  style=1, emoji=_emj("settings"))),
@@ -189,7 +189,7 @@ class PainelComprarView(discord.ui.View):
                 em.add_field(name="**Salas Gastas**",
                              value=f"> Hoje: **{d['hoje']}** · 7d: **{d['semana']}** · Total: **{d['total']}**",
                              inline=False)
-                em.add_field(name="**Comprar Salas**", value=f"R$ {preco:.2f}/sala — mín. 12", inline=False)
+                em.add_field(name="**Comprar Salas**", value=f"R$ {preco:.2f}/sala — mín. 30", inline=False)
                 await i.followup.send(embed=em, ephemeral=True)
             except Exception as ex2:
                 _log_p.error(f"[perfil fallback] {ex2}")

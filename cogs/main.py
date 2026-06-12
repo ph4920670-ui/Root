@@ -3324,7 +3324,7 @@ class MainCog(commands.Cog):
             "flags": 64 | 32768,
             "components": [{"id": 1, "type": 17, "components": [
                 {"id": 2, "type": 10, "content": f"## {e('store')} Perfil de {alvo.mention}"},
-                _sec(3,  f"**Comprar Salas**\nR$ {preco:.2f} por sala — mínimo 12 salas",
+                _sec(3,  f"**Comprar Salas**\nR$ {preco:.2f} por sala — mínimo 30 salas",
                          _btn(5,  "Comprar Salas", "cw:comprar", style=3, emoji=_em("carteira"))),
                 _sec(6,  "**Outros**\nVer lucro, config GO, bônus e histórico.",
                          _btn(8,  "Outros",        "cw:outros",  style=1, emoji=_em("settings"))),
@@ -3362,7 +3362,7 @@ class MainCog(commands.Cog):
                 em.set_thumbnail(url=alvo.display_avatar.url)
                 em.add_field(name="**Salas Disponíveis**", value=f"> **{d['saldo']} salas**", inline=False)
                 em.add_field(name="**Salas Gastas**", value=f"> Hoje: **{d['hoje']}** · 7d: **{d['semana']}** · Total: **{d['total']}**", inline=False)
-                em.add_field(name="**Comprar Salas**", value=f"R$ {preco:.2f}/sala — mín. 12", inline=False)
+                em.add_field(name="**Comprar Salas**", value=f"R$ {preco:.2f}/sala — mín. 30", inline=False)
                 await inter.followup.send(embed=em, view=CarteiraView(), ephemeral=True)
             except Exception as _fe:
                 _log.error(f"[cw fallback] {_fe}")
@@ -3471,7 +3471,7 @@ class MainCog(commands.Cog):
             "flags": 32768,
             "components": [{"id": 1, "type": 17, "components": [
                 {"id": 2, "type": 10, "content": f"## {e('store')} Carteira de {alvo.mention}"},
-                _sec(3,  f"**Comprar Salas**\nR$ {preco:.2f} por sala — mínimo 12 salas",
+                _sec(3,  f"**Comprar Salas**\nR$ {preco:.2f} por sala — mínimo 30 salas",
                          _btn(5,  "Comprar Salas", "cw:comprar", style=3, emoji=_em("carteira"))),
                 _sec(6,  "**Outros**\nVer lucro, config GO, bônus e histórico.",
                          _btn(8,  "Outros",        "cw:outros",  style=1, emoji=_em("settings"))),
@@ -3515,7 +3515,7 @@ class MainCog(commands.Cog):
                 em.set_thumbnail(url=alvo.display_avatar.url)
                 em.add_field(name="**Salas Disponíveis**", value=f"> **{d['saldo']} salas**", inline=False)
                 em.add_field(name="**Salas Gastas**", value=f"> Hoje: **{d['hoje']}** · 7d: **{d['semana']}** · Total: **{d['total']}**", inline=False)
-                em.add_field(name="**Comprar Salas**", value=f"R$ {preco:.2f}/sala — mín. 12", inline=False)
+                em.add_field(name="**Comprar Salas**", value=f"R$ {preco:.2f}/sala — mín. 30", inline=False)
                 em.add_field(name="**Comandos Rápidos**", value=f"`{p}c1` Normal  •  `{p}c2` Infinito  •  `{p}c3` Full Capa", inline=False)
                 await ctx.send(embed=em, view=CarteiraView())
             except Exception as _ex2:
