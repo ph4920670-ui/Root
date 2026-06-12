@@ -75,6 +75,7 @@ create table if not exists guild_config (
   criado_por text,
   criado_em timestamptz default now(),
   canal_compras_id text,
+  preco_sala numeric(10,4),
   cargos_por_qtd jsonb default '{}',
   avaliacao jsonb default '{}',
   chat_cmd jsonb default '{}',
