@@ -50,10 +50,11 @@ COR_AVISO   = int(os.environ.get("COR_AVISO",   "0xFEE75C"), 16)
 COR_AGUARDO = int(os.environ.get("COR_AGUARDO", "0x95A5A6"), 16)
 
 # ── Modos de sala ──────────────────────────────────────────────────────────
+# salaid = código enviado à API 1 (/criar?salaid=X); ajuste via /c3 modos ou botconfig
 MODOS = {
-    1: "Normal",
-    2: "Infinito",
-    3: "Full Capa",
+    1: {"nome": "Normal",    "emoji": "⚔️",  "salaid": "1", "canal_id": None},
+    2: {"nome": "Infinito",  "emoji": "♾️",  "salaid": "3", "canal_id": None},
+    3: {"nome": "Full Capa", "emoji": "👑",  "salaid": "4", "canal_id": None},
 }
 
 # ── Quantias disponíveis no menu de compra ─────────────────────────────────
