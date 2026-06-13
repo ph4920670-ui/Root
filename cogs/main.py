@@ -3564,7 +3564,56 @@ class MainCog(commands.Cog):
         await ctx.send(embed=em, view=C3ModoView())
 
     @commands.command(name="painel")
-    async def prefix_painel(self, ctx): await self.prefix_c(ctx)
+    async def prefix_painel(self, ctx):
+        """Posta o painel de compras no canal atual (+painel / .painel)."""
+        if not is_admin(ctx.author.id):
+            return
+        from cogs.botconfig import carregar_cfg
+        from utils.pix import get_preco_por_sala_guild
+        gid = str(ctx.guild.id) if ctx.guild else None
+        preco = get_preco_por_sala_guild(gid)
+        cfg = await asyncio.to_thread(carregar_cfg)
+        titulo    = cfg.get("titulo_painel_compra", "F Applications - Compre Aqui")
+        sub_titulo = cfg.get("subtitulo_painel_compra", "")
+        sub_desc   = cfg.get("subdesc_painel_compra", "")
+        sub_rodape = cfg.get("subrodape_painel_compra", "")
+
+        containers = [{
+            "id": 1, "type": 17,
+            "components": [
+                {"id": 2, "type": 10, "content": f"## {titulo}\n\n> **Valor:** R$ {preco:.2f} por sala"},
+                {"id": 3, "type": 1, "components": [
+                    {"id": 4, "type": 2, "style": 2, "label": "Meu Perfil",    "custom_id": "comprar:perfil"},
+                    {"id": 5, "type": 2, "style": 3, "label": "Comprar Salas", "custom_id": "comprar:comprar"},
+                ]},
+            ],
+        }]
+        if sub_titulo or sub_desc or sub_rodape:
+            sub_parts = []
+            if sub_titulo: sub_parts.append(f"## {sub_titulo}")
+            if sub_desc:   sub_parts.append(sub_desc)
+            if sub_rodape: sub_parts.append(f"-# {sub_rodape}")
+            containers.append({"id": 10, "type": 17, "accent_color": 0x2B2D31,
+                "components": [{"id": 11, "type": 10, "content": "\n\n".join(sub_parts)}]})
+
+        url = f"https://discord.com/api/v10/channels/{ctx.channel.id}/messages"
+        hdrs = {"Authorization": f"Bot {config.DISCORD_TOKEN}", "Content-Type": "application/json"}
+        ok = False
+        try:
+            async with _aiohttp_v2.ClientSession() as _s:
+                async with _s.post(url, headers=hdrs, json={"flags": 32768, "components": containers}) as r:
+                    ok = r.status in (200, 201)
+        except Exception as ex:
+            _log.error(f"[prefix_painel] {ex}")
+        if not ok:
+            from cogs.comprar import PainelComprarView
+            em = discord.Embed(color=0x2B2D31)
+            em.description = f"## {titulo}\n\n> **Valor:** R$ {preco:.2f} por sala"
+            await ctx.send(embed=em, view=PainelComprarView())
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
 
     @commands.command(name="cs")
     async def prefix_cs(self, ctx):
