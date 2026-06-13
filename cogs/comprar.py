@@ -826,4 +826,10 @@ class SimularAprovarView(discord.ui.View):
         await i.response.edit_message(embed=_err("Simulação cancelada."), view=self)
 
 
-async def setup(bot): await bot.add_cog(ComprarCog(bot))
+async def setup(bot):
+    await bot.add_cog(ComprarCog(bot))
+    # Persistent views — botões continuam funcionando após reiniciar o bot
+    bot.add_view(PainelComprarView())
+    bot.add_view(PainelGratisView())
+    from utils.logs import LogCompraView
+    bot.add_view(LogCompraView())
