@@ -1827,7 +1827,7 @@ def convidados_resolve_inviter(codigo: str, guild_id: str) -> str | None:
                .eq("guild_id", str(guild_id))
                .maybe_single()
                .execute())
-        return (res.data or {}).get("inviter_id")
+        return ((res and res.data) or {}).get("inviter_id")
     except Exception as e:
         _log.error(f"[convidados_resolve_inviter] {e}")
         return None

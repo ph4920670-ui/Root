@@ -107,7 +107,7 @@ class PainelOrgCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="painel")
+    @commands.command(name="orgpainel")
     async def cmd_painel(self, ctx: commands.Context):
         """Mostra o painel público da org (apenas em servidores que são orgs ativas)."""
         if ctx.guild is None:
