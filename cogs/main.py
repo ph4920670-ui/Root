@@ -3566,8 +3566,6 @@ class MainCog(commands.Cog):
     @commands.command(name="painel")
     async def prefix_painel(self, ctx):
         """Posta o painel de compras no canal atual (+painel / .painel)."""
-        if not is_admin(ctx.author.id):
-            return
         from cogs.botconfig import carregar_cfg
         from utils.pix import get_preco_por_sala_guild
         gid = str(ctx.guild.id) if ctx.guild else None
