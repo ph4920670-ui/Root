@@ -5006,7 +5006,16 @@ class SalaV2Cog(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(MainCog(bot))
-    await bot.add_cog(InfConfigCog(bot))
-    await bot.add_cog(PainelGlobalCog(bot))
-    await bot.add_cog(SalaV2Cog(bot))
+    import logging as _sl
+    _sl_log = _sl.getLogger("salasff.setup")
+    for _CogCls, _cog_name in [
+        (MainCog, "MainCog"),
+        (InfConfigCog, "InfConfigCog"),
+        (PainelGlobalCog, "PainelGlobalCog"),
+        (SalaV2Cog, "SalaV2Cog"),
+    ]:
+        try:
+            await bot.add_cog(_CogCls(bot))
+            _sl_log.info(f"[setup] {_cog_name} OK")
+        except Exception as _ex_cog:
+            _sl_log.error(f"[setup] {_cog_name} FALHOU: {_ex_cog}", exc_info=True)
