@@ -3965,6 +3965,37 @@ class _ModalRemoverSalas(discord.ui.Modal, title="🗑️ Remover Salas"):
         em.description = f"Selecione uma categoria abaixo.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         await i.response.send_message(embed=em, view=AdmSelectView(self), ephemeral=True)
 
+    # /painelglobal
+    @app_commands.guilds(*[discord.Object(id=g) for g in config.OWNER_GUILD_IDS])
+    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.command(name="painelglobal", description="[ADMIN] Central de painéis: criação, config e postagem.")
+    async def cmd_painelglobal(self, i: discord.Interaction):
+        import logging as _lg_pg
+        _log_pg = _lg_pg.getLogger("salasff.painelglobal")
+        try:
+            await i.response.defer(ephemeral=True)
+            if not is_admin(i.user.id):
+                return await i.followup.send(embed=_err("Sem permissão."), ephemeral=True)
+            em = _emb(f"{SETTINGS}  Painel Global", 0x5865F2)
+            em.description = (
+                "Selecione uma das opções abaixo:\n\n"
+                f"{DOT} **Criação de Salas** — posta o painel de criação no canal atual.\n"
+                f"{DOT} **Config de Compras** — altera preço e título do painel de compras.\n"
+                f"{DOT} **Postar Compras/Grátis** — publica o painel de compras ou grátis.\n"
+                f"{DOT} **Adicionar Bot** — publica o painel de instalação (Futuro Cliente).\n"
+                f"{DOT} **Dono de Org** — vantagens exclusivas.\n"
+                f"{DOT} **Tutorial Bônus** — passo a passo de como pegar bônus.\n"
+                f"{DOT} **Token Mode** — envie mensagens de sala com sua própria conta."
+            )
+            await i.followup.send(embed=em, view=PainelGlobalView(), ephemeral=True)
+        except Exception as _ex_pg:
+            _log_pg.error(f"[painelglobal] {_ex_pg}", exc_info=True)
+            try:
+                await i.followup.send(embed=_err("Erro interno.", f"`{_ex_pg}`"), ephemeral=True)
+            except Exception:
+                pass
+
 class InfConfigCog(commands.Cog):
     """Cog dedicado somente ao /infconfig — criado para contornar o fato de o
     comando original ter ficado preso dentro de _ModalRemoverSalas por um erro
@@ -5011,7 +5042,6 @@ async def setup(bot):
     for _CogCls, _cog_name in [
         (MainCog, "MainCog"),
         (InfConfigCog, "InfConfigCog"),
-        (PainelGlobalCog, "PainelGlobalCog"),
         (SalaV2Cog, "SalaV2Cog"),
     ]:
         try:
