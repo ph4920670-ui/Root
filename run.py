@@ -6,6 +6,7 @@ import os
 import sys
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 import uvicorn
 
@@ -52,6 +53,18 @@ def create_bot() -> commands.Bot:
         intents=intents,
         help_command=None,
     )
+
+    @bot.tree.error
+    async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        _log.error(f"[app_cmd_error] /{getattr(interaction.command, 'name', '?')} — {error}", exc_info=True)
+        try:
+            msg = f"❌ Erro interno: `{error}`"
+            if not interaction.response.is_done():
+                await interaction.response.send_message(msg, ephemeral=True)
+            else:
+                await interaction.followup.send(msg, ephemeral=True)
+        except Exception:
+            pass
 
     @bot.event
     async def on_ready():

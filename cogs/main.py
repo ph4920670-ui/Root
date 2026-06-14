@@ -3813,19 +3813,6 @@ class _ModalRemoverSalas(discord.ui.Modal, title="🗑️ Remover Salas"):
         await i.followup.send(embed=em, ephemeral=True)
         asyncio.create_task(_logs.log_gerasala(i.user, quantia, keys, [k["code"] for k in cr]))
 
-    # /infconfig — Saldo clientes + Estatísticas + Enviar DM
-    @app_commands.guilds(*_ADMIN_GUILDS)
-    @app_commands.allowed_installs(guilds=True, users=False)
-    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-    @app_commands.command(name="infconfig", description="[ADMIN] Saldo clientes, estatísticas e envio de DM.")
-    @app_commands.guilds(*[discord.Object(id=g) for g in config.OWNER_GUILD_IDS])
-    async def cmd_infconfig(self, i):
-        if not is_admin(i.user.id):
-            return await i.response.send_message(embed=_err("Sem permissão."), ephemeral=True)
-        em = _emb(f"{STATS}  Painel de Informações", 0x5865F2)
-        em.description = "Selecione uma opção abaixo."
-        await i.response.send_message(embed=em, view=InfConfigView(), ephemeral=True)
-
     # /verifica
     @app_commands.guilds(*_ADMIN_GUILDS)
     @app_commands.allowed_installs(guilds=True, users=False)
