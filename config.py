@@ -31,6 +31,13 @@ _load_dotenv()
 DISCORD_TOKEN    = os.environ.get("DISCORD_TOKEN", "")
 ADMIN_IDS        = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 OWNER_GUILD_IDS  = [int(x) for x in os.environ.get("OWNER_GUILD_IDS", "").split(",") if x.strip().isdigit()]
+# Guilds owner garantidas (sempre recebem os comandos admin via sync, mesmo
+# que não estejam no env OWNER_GUILD_IDS). Edite via env EXTRA_OWNER_GUILD_IDS.
+_EXTRA_OWNER_GUILDS = [1430297321094254783]
+_EXTRA_OWNER_GUILDS += [int(x) for x in os.environ.get("EXTRA_OWNER_GUILD_IDS", "").split(",") if x.strip().isdigit()]
+for _g in _EXTRA_OWNER_GUILDS:
+    if _g not in OWNER_GUILD_IDS:
+        OWNER_GUILD_IDS.append(_g)
 GUILD_IDS        = [int(x) for x in os.environ.get("GUILD_IDS", "").split(",") if x.strip().isdigit()]
 BACKUP_CHANNEL_ID = int(os.environ.get("BACKUP_CHANNEL_ID", "0") or "0")
 
