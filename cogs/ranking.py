@@ -26,8 +26,6 @@ _BR  = ZoneInfo("America/Sao_Paulo")
 # ── Constantes padrão ────────────────────────────────────────────────────────
 PREMIOS_SALAS_DEFAULT = [100, 80, 50]
 PREMIOS_REAIS_DEFAULT = [7.0, 5.0, 4.0]
-MEDALHAS = ["🥇", "🥈", "🥉"]
-NUMEROS  = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
 # ── Helpers internos ─────────────────────────────────────────────────────────
 
@@ -49,6 +47,22 @@ def _proximo_reset_str() -> str:
     if agora.hour < 23 or (agora.hour == 23 and agora.minute < 59):
         return agora.replace(hour=23, minute=59, second=0, microsecond=0).strftime("%d/%m às 23:59")
     return (agora + timedelta(days=1)).replace(hour=23, minute=59, second=0, microsecond=0).strftime("%d/%m às 23:59")
+
+
+# ── Emojis do bot para posições/prêmios ───────────────────────────────────────
+# Usa exclusivamente emojis do Application (PE / _em_str), sem unicode.
+_POS_KEYS = ["verified", "top", "swordbattle"]  # 1º (dourado animado), 2º, 3º
+
+def _pos_emoji(idx: int) -> str:
+    """String do emoji do bot para a posição (0-based)."""
+    if idx < len(_POS_KEYS):
+        return _em_str(_POS_KEYS[idx])
+    return _em_str("dot")
+
+def _emj_pos(idx: int):
+    """Dict do emoji do bot (Components V2) para a posição."""
+    key = _POS_KEYS[idx] if idx < len(_POS_KEYS) else "dot"
+    return _emj(key)
 
 # ── Geração de Imagem Top 3 ──────────────────────────────────────────────────
 
@@ -194,20 +208,20 @@ def _build_ranking_embed(top10: list, premios: dict = None) -> discord.Embed:
     premios_salas = premios["salas"]
     premios_reais = premios["reais"]
 
-    em = discord.Embed(title="🏆  Ranking Diário — Top Criadores de Sala", color=0xFFD700)
+    em = discord.Embed(title="Ranking Diário — Top Criadores de Sala", color=0xFFD700)
 
     cabecalho = (
-        f"**Hoje: {_hoje_str()}**\n"
+        f"{_em_str('calendario')}  **Hoje: {_hoje_str()}**\n"
         "Quem criar mais salas hoje entra no top!\n"
-        "**Top 3 recebe prêmios todo dia às 23:59 BRT.**\n\n"
+        f"{_em_str('presente')} **Top 3 recebe prêmios todo dia às 23:59 BRT.**\n\n"
     )
 
     if not top10:
-        em.description = cabecalho + "*Nenhuma sala criada hoje ainda. Seja o primeiro!*"
+        em.description = cabecalho + f"{_em_str('off')} *Nenhuma sala criada hoje ainda. Seja o primeiro!*"
     else:
         linhas = []
         for idx, u in enumerate(top10):
-            medal = MEDALHAS[idx] if idx < 3 else (NUMEROS[idx] if idx < 10 else f"{idx+1}°")
+            badge = _pos_emoji(idx) if idx < 3 else _em_str("dot")
             nome  = (u.get("user_nome") or "Desconhecido")[:24]
             total = u.get("total", 0)
             s = "s" if total != 1 else ""
@@ -215,11 +229,11 @@ def _build_ranking_embed(top10: list, premios: dict = None) -> discord.Embed:
                 premio_txt = f"  ╸ **+{premios_salas[idx]} salas + R${premios_reais[idx]:.0f}**"
             else:
                 premio_txt = ""
-            linhas.append(f"{medal} **{nome}** — {total} sala{s}{premio_txt}")
+            linhas.append(f"{badge} **{idx+1}º** **{nome}** — {total} sala{s}{premio_txt}")
         em.description = cabecalho + "\n".join(linhas)
 
     prizes = "\n".join(
-        f"{MEDALHAS[i]} **{i+1}° lugar** → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        f"{_pos_emoji(i)} **{i+1}º lugar** → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
         for i in range(3)
     )
     em.add_field(name=f"{GIFT}  Prêmios (todo dia às 23:59)", value=prizes, inline=False)
@@ -275,8 +289,6 @@ def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
     premios_salas = premios["salas"]
     premios_reais = premios["reais"]
 
-    POS_EMOJIS = [_em_str("verified"), _em_str("top"), _em_str("swordbattle")]
-
     if not top10:
         linhas_top = (
             f"{_em_str('off')}  *Nenhuma sala criada hoje ainda.*\n"
@@ -288,7 +300,7 @@ def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
             nome  = (u.get("user_nome") or "Desconhecido")[:24]
             total = u.get("total", 0)
             s = "s" if total != 1 else ""
-            badge = POS_EMOJIS[idx] if idx < 3 else _em_str("dot")
+            badge = _pos_emoji(idx) if idx < 3 else _em_str("dot")
             if idx < 3:
                 premio_txt = f" ╸ **+{premios_salas[idx]} salas + R${premios_reais[idx]:.0f}**"
             else:
@@ -296,9 +308,8 @@ def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
             linhas.append(f"{badge} **{idx+1}º** **{nome}** ╸ {total} sala{s}{premio_txt}")
         linhas_top = "\n".join(linhas)
 
-    medal_emojis = [_em_str("verified"), _em_str("top"), _em_str("swordbattle")]
     prizes_txt = "\n".join(
-        f"{medal_emojis[i]} **{i+1}º lugar** ╸ +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        f"{_pos_emoji(i)} **{i+1}º lugar** ╸ +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
         for i in range(3)
     )
 
@@ -329,37 +340,6 @@ def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
     return {"flags": 64 | 32768, "components": components}
 
 
-def _build_vencedores_embed(top3: list, dia_str: str, premios_salas: list, premios_reais: list) -> discord.Embed:
-    em = discord.Embed(
-        title="🏆  Ranking Diário — Vencedores!",
-        color=0xFFD700,
-        description=(
-            f"**Dia: {dia_str}**\n"
-            "Parabéns aos criadores mais ativos! "
-            "As salas foram adicionadas ao saldo de cada um. 🎉\n\n"
-        ),
-    )
-    if not top3:
-        em.description += "*Nenhum participante hoje.*"
-    else:
-        linhas = []
-        for idx, u in enumerate(top3[:3]):
-            medal   = MEDALHAS[idx]
-            uid     = u.get("user_id", "?")
-            nome    = (u.get("user_nome") or "Desconhecido")[:24]
-            total   = u.get("total", 0)
-            s       = "s" if total != 1 else ""
-            s_salas = premios_salas[idx] if idx < len(premios_salas) else 0
-            s_reais = premios_reais[idx] if idx < len(premios_reais) else 0.0
-            linhas.append(
-                f"{medal} <@{uid}> **{nome}**\n"
-                f"  └ {total} sala{s} criada{s} → **+{s_salas} salas + R${s_reais:.0f}**"
-            )
-        em.description += "\n\n".join(linhas)
-    em.set_footer(text="Amanhã começa do zero! Corra para o top 🚀")
-    return em
-
-
 def _build_config_embed() -> discord.Embed:
     from utils.database import ranking_canal_anuncio_get, ranking_ativo_get, ranking_premios_get
     canal_id = ranking_canal_anuncio_get()
@@ -372,7 +352,7 @@ def _build_config_embed() -> discord.Embed:
     status    = f"{ON} **Ativo**" if ativo else f"{OFF} **Desativado**"
 
     prizes = "\n".join(
-        f"{MEDALHAS[i]} {i+1}° lugar → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        f"{_pos_emoji(i)} {i+1}º lugar → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
         for i in range(3)
     )
 
@@ -410,6 +390,115 @@ def _emj(key: str):
     if not em:
         return None
     return {"id": str(em.id), "name": em.name, "animated": em.animated}
+
+
+# ── Anúncio dos vencedores em Components V2 (com imagem do pódio) ──────────────
+
+def _build_anuncio_v2_payload(top3: list, premios_salas: list, premios_reais: list,
+                              dia_str: str, ephemeral: bool = False,
+                              com_imagem: bool = True, filename: str = "ranking_top3.png") -> dict:
+    """Container V2 do anúncio diário: título, imagem do pódio e lista de vencedores.
+    Usa exclusivamente emojis do bot."""
+    if top3:
+        linhas = []
+        for idx, u in enumerate(top3[:3]):
+            badge   = _pos_emoji(idx)
+            uid     = u.get("user_id", "?")
+            nome    = (u.get("user_nome") or "Desconhecido")[:24]
+            total   = u.get("total", 0)
+            s       = "s" if total != 1 else ""
+            s_salas = premios_salas[idx] if idx < len(premios_salas) else 0
+            s_reais = premios_reais[idx] if idx < len(premios_reais) else 0.0
+            linhas.append(
+                f"{badge} **{idx+1}º** <@{uid}> ╸ {total} sala{s} criada{s}\n"
+                f"-# {_em_str('presente')} +{s_salas} salas  •  {_em_str('otherdollar')} R${s_reais:.0f}"
+            )
+        corpo = "\n".join(linhas)
+    else:
+        corpo = f"{_em_str('off')}  *Nenhum participante hoje.*"
+
+    inner = [
+        {"id": 2, "type": 10, "content": f"## {_em_str('verified')}  Ranking Diário — Vencedores!"},
+        {"id": 3, "type": 10, "content": f"{_em_str('calendario')}  **Dia:** {dia_str}"},
+    ]
+    if com_imagem:
+        inner.append({
+            "id": 4, "type": 12,  # Media Gallery
+            "items": [{"media": {"url": f"attachment://{filename}"}}],
+        })
+    inner += [
+        {"id": 5, "type": 14, "divider": True, "spacing": 2},
+        {"id": 6, "type": 10, "content": corpo},
+        {"id": 7, "type": 14, "divider": True, "spacing": 1},
+        {
+            "id": 8, "type": 10,
+            "content": (
+                f"-# {_em_str('clockcheck')} As salas já foram creditadas automaticamente.  "
+                f"Próximo reset: **{_proximo_reset_str()}**"
+            ),
+        },
+    ]
+
+    components = [{"id": 1, "type": 17, "accent_color": 0xFFD700, "components": inner}]
+
+    flags = 32768  # IS_COMPONENTS_V2
+    if ephemeral:
+        flags |= 64
+
+    payload = {"flags": flags, "components": components}
+    if com_imagem:
+        payload["attachments"] = [{"id": 0, "filename": filename}]
+    return payload
+
+
+async def _post_v2_canal(channel_id: int, payload: dict, img_bytes: bytes = None,
+                         filename: str = "ranking_top3.png") -> bool:
+    """Posta um payload V2 num canal (via bot token). Se img_bytes, usa multipart."""
+    import json as _json
+    url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+    headers = {"Authorization": f"Bot {config.DISCORD_TOKEN}"}
+    try:
+        async with aiohttp.ClientSession() as s:
+            if img_bytes:
+                form = aiohttp.FormData()
+                form.add_field("payload_json", _json.dumps(payload), content_type="application/json")
+                form.add_field("files[0]", img_bytes, filename=filename, content_type="image/png")
+                req = s.post(url, data=form, headers=headers, timeout=aiohttp.ClientTimeout(total=20))
+            else:
+                h = {**headers, "Content-Type": "application/json"}
+                req = s.post(url, json=payload, headers=h, timeout=aiohttp.ClientTimeout(total=20))
+            async with req as r:
+                ok = r.status in (200, 201)
+                if not ok:
+                    _log.warning(f"[ranking v2 canal] {r.status} {(await r.text())[:200]}")
+                return ok
+    except Exception as ex:
+        _log.error(f"[ranking v2 canal] {ex}")
+        return False
+
+
+async def _followup_v2(app_id: int, token: str, payload: dict, img_bytes: bytes = None,
+                       filename: str = "ranking_previa.png") -> bool:
+    """Envia um followup de interaction com payload V2 (via webhook). Suporta imagem (multipart)."""
+    import json as _json
+    url = f"https://discord.com/api/v10/webhooks/{app_id}/{token}"
+    try:
+        async with aiohttp.ClientSession() as s:
+            if img_bytes:
+                form = aiohttp.FormData()
+                form.add_field("payload_json", _json.dumps(payload), content_type="application/json")
+                form.add_field("files[0]", img_bytes, filename=filename, content_type="image/png")
+                req = s.post(url, data=form, timeout=aiohttp.ClientTimeout(total=20))
+            else:
+                req = s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=20))
+            async with req as r:
+                ok = r.status in (200, 201)
+                if not ok:
+                    _log.warning(f"[ranking v2 followup] {r.status} {(await r.text())[:200]}")
+                return ok
+    except Exception as ex:
+        _log.error(f"[ranking v2 followup] {ex}")
+        return False
 
 
 def _build_perfil_v2_payload(user, posicao, salas_hoje, saldo, total_participantes) -> dict:
@@ -513,9 +602,9 @@ class _ModalPremiosRanking(discord.ui.Modal, title="Configurar Prêmios do Ranki
             await inter.response.send_message(
                 embed=_ok(
                     "Prêmios atualizados!",
-                    f"🥇 Top1: **{salas_list[0]} salas** + **R${reais_list[0]:.0f}**\n"
-                    f"🥈 Top2: **{salas_list[1]} salas** + **R${reais_list[1]:.0f}**\n"
-                    f"🥉 Top3: **{salas_list[2]} salas** + **R${reais_list[2]:.0f}**",
+                    f"{_pos_emoji(0)} Top1: **{salas_list[0]} salas** + **R${reais_list[0]:.0f}**\n"
+                    f"{_pos_emoji(1)} Top2: **{salas_list[1]} salas** + **R${reais_list[1]:.0f}**\n"
+                    f"{_pos_emoji(2)} Top3: **{salas_list[2]} salas** + **R${reais_list[2]:.0f}**",
                 ),
                 ephemeral=True,
             )
@@ -660,19 +749,21 @@ class RankingConfigView(discord.ui.View):
             from utils.database import top_criadores_hoje, ranking_premios_get
             top3    = await asyncio.to_thread(top_criadores_hoje, 3)
             premios = await asyncio.to_thread(ranking_premios_get)
+            premios_salas = premios["salas"]
+            premios_reais = premios["reais"]
             img_bytes = await asyncio.to_thread(
-                _gerar_imagem_top3, top3, premios["salas"], premios["reais"]
+                _gerar_imagem_top3, top3, premios_salas, premios_reais
             )
-            if img_bytes:
-                f = discord.File(io.BytesIO(img_bytes), filename="ranking_previa.png")
+            dia_str = datetime.now(_BR).strftime("%d/%m/%Y")
+            payload = _build_anuncio_v2_payload(
+                top3, premios_salas, premios_reais, dia_str,
+                ephemeral=True, com_imagem=bool(img_bytes), filename="ranking_previa.png",
+            )
+            app_id = inter.client.application_id
+            ok = await _followup_v2(app_id, inter.token, payload, img_bytes, "ranking_previa.png")
+            if not ok:
                 await inter.followup.send(
-                    embed=_info("Prévia do Ranking Diário", "Assim ficará o anúncio às 23:59 BRT."),
-                    file=f,
-                    ephemeral=True,
-                )
-            else:
-                await inter.followup.send(
-                    embed=_err("Imagem indisponível.", "PIL (Pillow) não está instalado no servidor."),
+                    embed=_err("Não foi possível gerar a prévia.", "Veja os logs."),
                     ephemeral=True,
                 )
         except Exception as ex:
@@ -704,23 +795,20 @@ class RankingConfigView(discord.ui.View):
 
             canal_id = await asyncio.to_thread(ranking_canal_anuncio_get)
             if canal_id:
-                canal = inter.client.get_channel(int(canal_id))
-                if canal:
-                    dia_str   = datetime.now(_BR).strftime("%d/%m/%Y")
-                    em_venc   = _build_vencedores_embed(top3, dia_str, premios_salas, premios_reais)
-                    img_bytes = await asyncio.to_thread(
-                        _gerar_imagem_top3, top3, premios_salas, premios_reais
-                    )
-                    if img_bytes:
-                        f = discord.File(io.BytesIO(img_bytes), filename="ranking_top3.png")
-                        await canal.send(embed=em_venc, file=f)
-                    else:
-                        await canal.send(embed=em_venc)
+                dia_str   = datetime.now(_BR).strftime("%d/%m/%Y")
+                img_bytes = await asyncio.to_thread(
+                    _gerar_imagem_top3, top3, premios_salas, premios_reais
+                )
+                payload = _build_anuncio_v2_payload(
+                    top3, premios_salas, premios_reais, dia_str,
+                    com_imagem=bool(img_bytes), filename="ranking_top3.png",
+                )
+                await _post_v2_canal(int(canal_id), payload, img_bytes, "ranking_top3.png")
 
             await asyncio.to_thread(ranking_ultimo_reset_set, datetime.now(_BR).isoformat())
 
             linhas = [
-                f"{MEDALHAS[i]} **{nome}** → +{premio} salas"
+                f"{_pos_emoji(i)} **{nome}** → +{premio} salas"
                 for i, (uid, nome, premio) in enumerate(resultados)
             ]
             await inter.followup.send(
@@ -910,22 +998,14 @@ class RankingCog(commands.Cog):
                 _log.warning("[ranking] Canal de anúncio não configurado.")
                 return
 
-            canal = self.bot.get_channel(int(canal_id))
-            if not canal:
-                _log.warning(f"[ranking] Canal {canal_id} não encontrado.")
-                return
-
             dia_str   = datetime.now(_BR).strftime("%d/%m/%Y")
-            em        = _build_vencedores_embed(top3, dia_str, premios_salas, premios_reais)
             img_bytes = await asyncio.to_thread(_gerar_imagem_top3, top3, premios_salas, premios_reais)
-
-            if img_bytes:
-                f = discord.File(io.BytesIO(img_bytes), filename="ranking_top3.png")
-                await canal.send(embed=em, file=f)
-            else:
-                await canal.send(embed=em)
-
-            _log.info(f"[ranking] Anúncio diário enviado em #{canal.name}")
+            payload   = _build_anuncio_v2_payload(
+                top3, premios_salas, premios_reais, dia_str,
+                com_imagem=bool(img_bytes), filename="ranking_top3.png",
+            )
+            ok = await _post_v2_canal(int(canal_id), payload, img_bytes, "ranking_top3.png")
+            _log.info(f"[ranking] Anúncio diário V2 enviado no canal {canal_id} (ok={ok})")
 
         except Exception as ex:
             _log.error(f"[ranking._executar_reset] {ex}")
