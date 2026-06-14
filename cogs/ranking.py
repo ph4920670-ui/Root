@@ -1,13 +1,15 @@
-# cogs/ranking.py — Sistema de Ranking Semanal (Top Criadores de Sala)
+# cogs/ranking.py — Sistema de Ranking Diário (Top Criadores de Sala)
 #
 # Fluxo:
-#   • Toda segunda-feira 00:00 BRT → distribui prêmios ao top 5 e anuncia no canal
+#   • Todo dia às 23:59 BRT → distribui prêmios ao top 3 e posta imagem no canal
 #   • /painelglobal → "🏆 Postar Ranking"  posta painel público com botão Atualizar
 #   • /painelglobal → "📊 Ver Ranking"     mostra top 10 ephemeral para o admin
-#   • /botconfig    → "🏆 Ranking Semanal" configura canal de anúncio / ativa-desativa
+#   • /botconfig    → "🏆 Ranking Diário"  configura canal / ativa-desativa / prêmios
 
 import asyncio
+import io
 import logging
+import os
 import aiohttp
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -21,10 +23,10 @@ from utils.emojis import ON, OFF, DOT, INFO, TOP, GIFT, STATS, PE, CART, PRESENT
 _log = logging.getLogger("salasff.ranking")
 _BR  = ZoneInfo("America/Sao_Paulo")
 
-# ── Constantes ──────────────────────────────────────────────────────────────
-
-PREMIOS  = [500, 400, 300, 200, 100]
-MEDALHAS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+# ── Constantes padrão ────────────────────────────────────────────────────────
+PREMIOS_SALAS_DEFAULT = [100, 80, 50]
+PREMIOS_REAIS_DEFAULT = [7.0, 5.0, 4.0]
+MEDALHAS = ["🥇", "🥈", "🥉"]
 NUMEROS  = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
 # ── Helpers internos ─────────────────────────────────────────────────────────
@@ -39,94 +41,222 @@ def _info(t, d=""): return _emb(f"{INFO}  {t}", config.COR_INFO, d)
 def _is_admin(uid: int) -> bool:
     return not config.ADMIN_IDS or uid in config.ADMIN_IDS
 
-def _inicio_semana() -> datetime:
+def _hoje_str() -> str:
+    return datetime.now(_BR).strftime("%d/%m/%Y")
+
+def _proximo_reset_str() -> str:
     agora = datetime.now(_BR)
-    seg   = agora - timedelta(days=agora.weekday())   # weekday: Mon=0
-    return seg.replace(hour=0, minute=0, second=0, microsecond=0)
+    if agora.hour < 23 or (agora.hour == 23 and agora.minute < 59):
+        return agora.replace(hour=23, minute=59, second=0, microsecond=0).strftime("%d/%m às 23:59")
+    return (agora + timedelta(days=1)).replace(hour=23, minute=59, second=0, microsecond=0).strftime("%d/%m às 23:59")
 
-def _fim_semana() -> datetime:
-    return _inicio_semana() + timedelta(days=7)
+# ── Geração de Imagem Top 3 ──────────────────────────────────────────────────
 
-def _semana_str(inicio: datetime) -> str:
-    fim = inicio + timedelta(days=6)
-    return f"{inicio.strftime('%d/%m')} – {fim.strftime('%d/%m/%Y')}"
+def _gerar_imagem_top3(top3: list, premios_salas: list, premios_reais: list) -> bytes | None:
+    """Gera PNG 900x400 com o pódio do dia."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return None
+
+    W, H = 900, 400
+    BG = (13, 17, 23)
+    img = Image.new("RGB", (W, H), BG)
+    draw = ImageDraw.Draw(img)
+
+    font_dir = "/usr/share/fonts/truetype/dejavu"
+
+    def _f(size, bold=True):
+        fname = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        try:
+            return ImageFont.truetype(os.path.join(font_dir, fname), size)
+        except Exception:
+            return ImageFont.load_default()
+
+    agora = datetime.now(_BR)
+
+    # Barra dourada no topo
+    draw.rectangle([0, 0, W, 6], fill=(255, 215, 0))
+
+    f30 = _f(30)
+    f17 = _f(17, bold=False)
+    f20 = _f(20)
+    f16 = _f(16, bold=False)
+    f15 = _f(15)
+    f14 = _f(14)
+    f18 = _f(18)
+
+    # Título
+    title = "TOP CRIADORES DO DIA"
+    tb = draw.textbbox((0, 0), title, font=f30)
+    draw.text(((W - (tb[2] - tb[0])) // 2, 14), title, font=f30, fill=(255, 215, 0))
+
+    # Data
+    date_txt = agora.strftime("%d/%m/%Y")
+    db2 = draw.textbbox((0, 0), date_txt, font=f17)
+    draw.text(((W - (db2[2] - db2[0])) // 2, 52), date_txt, font=f17, fill=(136, 153, 166))
+
+    # Linha divisória
+    draw.rectangle([50, 86, W - 50, 88], fill=(40, 40, 50))
+
+    # Cards
+    col_colors = [(255, 215, 0), (192, 192, 192), (205, 127, 50)]
+    pos_labels = ["1 LUGAR", "2 LUGAR", "3 LUGAR"]
+    card_margin = 18
+    card_gap = 10
+    card_w = (W - 2 * card_margin - 2 * card_gap) // 3
+    card_y_start = 96
+    card_h = H - card_y_start - card_margin
+
+    for i in range(3):
+        cx = card_margin + i * (card_w + card_gap)
+        cy = card_y_start
+        c = col_colors[i]
+
+        u = top3[i] if i < len(top3) else None
+        nome = ((u.get("user_nome") or "---")[:18]) if u else "---"
+        total = u.get("total", 0) if u else 0
+        s_salas = premios_salas[i] if i < len(premios_salas) else 0
+        s_reais = premios_reais[i] if i < len(premios_reais) else 0.0
+
+        # Fundo do card
+        draw.rounded_rectangle(
+            [cx, cy, cx + card_w, cy + card_h],
+            radius=10, fill=(20, 26, 34), outline=c, width=2,
+        )
+
+        # Badge de posição
+        badge_h = 42
+        draw.rounded_rectangle([cx, cy, cx + card_w, cy + badge_h], radius=10, fill=c)
+        draw.rectangle([cx, cy + badge_h // 2, cx + card_w, cy + badge_h], fill=c)
+
+        f_lbl = _f(18)
+        lb = draw.textbbox((0, 0), pos_labels[i], font=f_lbl)
+        lw, lh = lb[2] - lb[0], lb[3] - lb[1]
+        draw.text(
+            (cx + (card_w - lw) // 2, cy + (badge_h - lh) // 2 - 1),
+            pos_labels[i], font=f_lbl, fill=(0, 0, 0),
+        )
+
+        iy = cy + badge_h + 10
+
+        # Nome
+        nb = draw.textbbox((0, 0), nome, font=f18)
+        nw, nh = nb[2] - nb[0], nb[3] - nb[1]
+        draw.text((cx + (card_w - nw) // 2, iy), nome, font=f18, fill=(255, 255, 255))
+        iy += nh + 8
+
+        # Salas criadas hoje
+        sc = f"{total} sala{'s' if total != 1 else ''} hoje"
+        sb = draw.textbbox((0, 0), sc, font=f15)
+        sw, sh = sb[2] - sb[0], sb[3] - sb[1]
+        draw.text((cx + (card_w - sw) // 2, iy), sc, font=f15, fill=(136, 153, 166))
+        iy += sh + 12
+
+        # Divisória interna
+        draw.rectangle([cx + 16, iy, cx + card_w - 16, iy + 1], fill=(40, 40, 50))
+        iy += 10
+
+        # Label "PREMIO"
+        lbl = "PREMIO"
+        lb2 = draw.textbbox((0, 0), lbl, font=f14)
+        lw2 = lb2[2] - lb2[0]
+        draw.text((cx + (card_w - lw2) // 2, iy), lbl, font=f14, fill=(90, 90, 100))
+        iy += 22
+
+        # Salas
+        ps = f"+{s_salas} salas"
+        psb = draw.textbbox((0, 0), ps, font=f20)
+        psw, psh = psb[2] - psb[0], psb[3] - psb[1]
+        draw.text((cx + (card_w - psw) // 2, iy), ps, font=f20, fill=c)
+        iy += psh + 6
+
+        # R$
+        pr = f"+ R$ {s_reais:.0f}"
+        prb = draw.textbbox((0, 0), pr, font=f16)
+        prw = prb[2] - prb[0]
+        draw.text((cx + (card_w - prw) // 2, iy), pr, font=f16, fill=(87, 242, 135))
+
+    # Barra dourada no rodapé
+    draw.rectangle([0, H - 6, W, H], fill=(255, 215, 0))
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.read()
+
 
 # ── Embeds ────────────────────────────────────────────────────────────────────
 
-def _build_ranking_embed(top10: list) -> discord.Embed:
-    inicio = _inicio_semana()
-    prox   = _fim_semana().strftime("%d/%m às 00:00")
+def _build_ranking_embed(top10: list, premios: dict = None) -> discord.Embed:
+    if premios is None:
+        premios = {"salas": list(PREMIOS_SALAS_DEFAULT), "reais": list(PREMIOS_REAIS_DEFAULT)}
+    premios_salas = premios["salas"]
+    premios_reais = premios["reais"]
 
-    em = discord.Embed(
-        title="🏆  Ranking Semanal — Top Criadores de Sala",
-        color=0xFFD700,
-    )
+    em = discord.Embed(title="🏆  Ranking Diário — Top Criadores de Sala", color=0xFFD700)
 
     cabecalho = (
-        f"**Semana: {_semana_str(inicio)}**\n"
-        f"Quem criar mais salas essa semana entra no top!\n"
-        f"**Top 5 recebe prêmios toda segunda-feira.**\n\n"
+        f"**Hoje: {_hoje_str()}**\n"
+        "Quem criar mais salas hoje entra no top!\n"
+        "**Top 3 recebe prêmios todo dia às 23:59 BRT.**\n\n"
     )
 
     if not top10:
-        em.description = cabecalho + "*Nenhuma sala criada esta semana ainda. Seja o primeiro!*"
+        em.description = cabecalho + "*Nenhuma sala criada hoje ainda. Seja o primeiro!*"
     else:
         linhas = []
         for idx, u in enumerate(top10):
-            medal  = MEDALHAS[idx] if idx < 5 else NUMEROS[idx]
-            nome   = (u.get("user_nome") or "Desconhecido")[:24]
-            total  = u.get("total", 0)
-            premio = f"  ╸ **+{PREMIOS[idx]} salas**" if idx < 5 else ""
-            s      = "s" if total != 1 else ""
-            linhas.append(f"{medal} **{nome}** — {total} sala{s}{premio}")
+            medal = MEDALHAS[idx] if idx < 3 else (NUMEROS[idx] if idx < 10 else f"{idx+1}°")
+            nome  = (u.get("user_nome") or "Desconhecido")[:24]
+            total = u.get("total", 0)
+            s = "s" if total != 1 else ""
+            if idx < 3:
+                premio_txt = f"  ╸ **+{premios_salas[idx]} salas + R${premios_reais[idx]:.0f}**"
+            else:
+                premio_txt = ""
+            linhas.append(f"{medal} **{nome}** — {total} sala{s}{premio_txt}")
         em.description = cabecalho + "\n".join(linhas)
 
     prizes = "\n".join(
-        f"{MEDALHAS[i]} **{i+1}° lugar** → +{PREMIOS[i]} salas"
-        for i in range(5)
+        f"{MEDALHAS[i]} **{i+1}° lugar** → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        for i in range(3)
     )
-    em.add_field(name=f"{GIFT}  Prêmios (toda segunda-feira)", value=prizes, inline=False)
-    em.set_footer(text=f"Próximo reset: {prox}  •  Contagem desde segunda 00:00 BRT")
+    em.add_field(name=f"{GIFT}  Prêmios (todo dia às 23:59)", value=prizes, inline=False)
+    em.set_footer(text=f"Próximo reset: {_proximo_reset_str()}  •  Contagem desde meia-noite BRT")
     return em
 
 
 def _build_ranking_v2_payload(top10: list = None) -> dict:
-    """Painel público inicial em Components V2 — só cabeçalho + botões.
-    O parâmetro top10 é mantido por compatibilidade mas ignorado (tabela só aparece no ephemeral)."""
-    inicio = _inicio_semana()
-
+    """Painel público inicial em Components V2 — cabeçalho + botões."""
     components = [{
         "id": 1,
-        "type": 17,  # Container
+        "type": 17,
         "accent_color": 0xFFD700,
         "components": [
-            # Cabeçalho
             {
                 "id": 2, "type": 10,
-                "content": f"## {_em_str('top')}  Ranking Semanal — Top Criadores de Sala",
+                "content": f"## {_em_str('top')}  Ranking Diário — Top Criadores de Sala",
             },
             {
                 "id": 3, "type": 10,
                 "content": (
-                    f"{_em_str('calendario')}  **Semana:** {_semana_str(inicio)}\n"
-                    f"-# Quem criar mais salas essa semana entra no top — **Top 5** recebe prêmios toda segunda-feira.\n"
-                    f"-# Clique em **Ranking** para ver a tabela completa, ou **Meu Perfil** para ver sua posição."
+                    f"{_em_str('calendario')}  **Hoje:** {_hoje_str()}\n"
+                    "-# Quem criar mais salas hoje entra no top — **Top 3** recebe prêmios todo dia às 23:59 BRT.\n"
+                    "-# Clique em **Ranking** para ver a tabela completa, ou **Meu Perfil** para ver sua posição."
                 ),
             },
-            # Botões (Action Row)
             {
-                "id": 4, "type": 1,  # Action Row
+                "id": 4, "type": 1,
                 "components": [
                     {
-                        "type": 2,  # Button
-                        "style": 1,  # Primary (azul)
+                        "type": 2, "style": 1,
                         "label": "Ranking",
                         "emoji": _emj("top"),
                         "custom_id": "ranking:atualizar",
                     },
                     {
-                        "type": 2,
-                        "style": 2,  # Secondary
+                        "type": 2, "style": 2,
                         "label": "Meu Perfil",
                         "emoji": _emj("info"),
                         "custom_id": "ranking:perfil",
@@ -135,29 +265,22 @@ def _build_ranking_v2_payload(top10: list = None) -> dict:
             },
         ],
     }]
-
-    # flag 32768 = IS_COMPONENTS_V2 (público — sem flag 64)
     return {"flags": 32768, "components": components}
 
 
-def _build_ranking_tabela_v2_payload(top10: list) -> dict:
-    """Container V2 ephemeral com a tabela completa do top 10 + prêmios + rodapé.
-    Mostrado quando alguém clica em 'Ranking'."""
-    inicio = _inicio_semana()
-    prox   = _fim_semana().strftime("%d/%m às 00:00")
+def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
+    """Container V2 ephemeral com a tabela top 10 + prêmios + rodapé."""
+    if premios is None:
+        premios = {"salas": list(PREMIOS_SALAS_DEFAULT), "reais": list(PREMIOS_REAIS_DEFAULT)}
+    premios_salas = premios["salas"]
+    premios_reais = premios["reais"]
 
-    # Emojis de posição (todos do bot)
-    POS_EMOJIS = [
-        _em_str("verified"),    # 1º — animado dourado
-        _em_str("top"),         # 2º
-        _em_str("swordbattle"), # 3º
-    ]
+    POS_EMOJIS = [_em_str("verified"), _em_str("top"), _em_str("swordbattle")]
 
-    # Linhas do top
     if not top10:
         linhas_top = (
-            f"{_em_str('off')}  *Nenhuma sala criada esta semana ainda.*\n"
-            f"-# Seja o primeiro a entrar no ranking!"
+            f"{_em_str('off')}  *Nenhuma sala criada hoje ainda.*\n"
+            "-# Seja o primeiro a entrar no ranking!"
         )
     else:
         linhas = []
@@ -165,203 +288,109 @@ def _build_ranking_tabela_v2_payload(top10: list) -> dict:
             nome  = (u.get("user_nome") or "Desconhecido")[:24]
             total = u.get("total", 0)
             s = "s" if total != 1 else ""
+            badge = POS_EMOJIS[idx] if idx < 3 else _em_str("dot")
             if idx < 3:
-                badge = POS_EMOJIS[idx]
-            else:
-                badge = _em_str("dot")
-            pos_label = f"**{idx+1}º**"
-
-            if idx < 5:
-                premio_txt = f" ╸ **+{PREMIOS[idx]} salas**"
+                premio_txt = f" ╸ **+{premios_salas[idx]} salas + R${premios_reais[idx]:.0f}**"
             else:
                 premio_txt = ""
-
-            linhas.append(
-                f"{badge} {pos_label} **{nome}** ╸ {total} sala{s}{premio_txt}"
-            )
+            linhas.append(f"{badge} **{idx+1}º** **{nome}** ╸ {total} sala{s}{premio_txt}")
         linhas_top = "\n".join(linhas)
 
-    # Bloco de prêmios
-    medal_emojis = [
-        _em_str("verified"),
-        _em_str("top"),
-        _em_str("swordbattle"),
-        _em_str("dot"),
-        _em_str("dot"),
-    ]
-    prizes_lines = []
-    for i in range(5):
-        prizes_lines.append(
-            f"{medal_emojis[i]} **{i+1}º lugar** ╸ +{PREMIOS[i]} salas"
-        )
-    prizes_txt = "\n".join(prizes_lines)
+    medal_emojis = [_em_str("verified"), _em_str("top"), _em_str("swordbattle")]
+    prizes_txt = "\n".join(
+        f"{medal_emojis[i]} **{i+1}º lugar** ╸ +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        for i in range(3)
+    )
 
     components = [{
         "id": 1,
         "type": 17,
         "accent_color": 0xFFD700,
         "components": [
-            {
-                "id": 2, "type": 10,
-                "content": f"## {_em_str('top')}  Ranking Semanal — Top 10",
-            },
-            {
-                "id": 3, "type": 10,
-                "content": f"{_em_str('calendario')}  **Semana:** {_semana_str(inicio)}",
-            },
+            {"id": 2, "type": 10, "content": f"## {_em_str('top')}  Ranking Diário — Top 10"},
+            {"id": 3, "type": 10, "content": f"{_em_str('calendario')}  **Hoje:** {_hoje_str()}"},
             {"id": 4, "type": 14, "divider": True, "spacing": 2},
-            {
-                "id": 5, "type": 10,
-                "content": linhas_top,
-            },
+            {"id": 5, "type": 10, "content": linhas_top},
             {"id": 6, "type": 14, "divider": True, "spacing": 2},
             {
                 "id": 7, "type": 10,
-                "content": f"### {_em_str('presente')}  Prêmios — toda segunda-feira\n{prizes_txt}",
+                "content": f"### {_em_str('presente')}  Prêmios — todo dia às 23:59 BRT\n{prizes_txt}",
             },
             {"id": 8, "type": 14, "divider": True, "spacing": 1},
             {
                 "id": 9, "type": 10,
                 "content": (
-                    f"-# {_em_str('clockcheck')} Próximo reset: **{prox}**  •  "
-                    f"Contagem desde segunda 00:00 BRT"
+                    f"-# {_em_str('clockcheck')} Próximo reset: **{_proximo_reset_str()}**  •  "
+                    "Contagem desde meia-noite BRT"
                 ),
             },
         ],
     }]
-
-    # flag 64 (ephemeral) | 32768 (Components V2)
     return {"flags": 64 | 32768, "components": components}
 
 
-def _build_vencedores_embed(top5: list, semana_str: str) -> discord.Embed:
+def _build_vencedores_embed(top3: list, dia_str: str, premios_salas: list, premios_reais: list) -> discord.Embed:
     em = discord.Embed(
-        title="🏆  Ranking Semanal — Vencedores!",
+        title="🏆  Ranking Diário — Vencedores!",
         color=0xFFD700,
         description=(
-            f"**Semana: {semana_str}**\n"
+            f"**Dia: {dia_str}**\n"
             "Parabéns aos criadores mais ativos! "
-            "Os prêmios foram adicionados ao saldo de cada um. 🎉\n\n"
+            "As salas foram adicionadas ao saldo de cada um. 🎉\n\n"
         ),
     )
-    if not top5:
-        em.description += "*Nenhum participante esta semana.*"
+    if not top3:
+        em.description += "*Nenhum participante hoje.*"
     else:
         linhas = []
-        for idx, u in enumerate(top5):
-            medal  = MEDALHAS[idx]
-            uid    = u.get("user_id", "?")
-            nome   = (u.get("user_nome") or "Desconhecido")[:24]
-            total  = u.get("total", 0)
-            s      = "s" if total != 1 else ""
-            premio = PREMIOS[idx]
+        for idx, u in enumerate(top3[:3]):
+            medal   = MEDALHAS[idx]
+            uid     = u.get("user_id", "?")
+            nome    = (u.get("user_nome") or "Desconhecido")[:24]
+            total   = u.get("total", 0)
+            s       = "s" if total != 1 else ""
+            s_salas = premios_salas[idx] if idx < len(premios_salas) else 0
+            s_reais = premios_reais[idx] if idx < len(premios_reais) else 0.0
             linhas.append(
                 f"{medal} <@{uid}> **{nome}**\n"
-                f"  └ {total} sala{s} criada{s} → **+{premio} salas ganhas**"
+                f"  └ {total} sala{s} criada{s} → **+{s_salas} salas + R${s_reais:.0f}**"
             )
         em.description += "\n\n".join(linhas)
-    em.set_footer(text="Nova semana começou! Corra para o top 🚀")
+    em.set_footer(text="Amanhã começa do zero! Corra para o top 🚀")
     return em
 
 
 def _build_config_embed() -> discord.Embed:
-    from utils.database import ranking_canal_anuncio_get, ranking_ativo_get
+    from utils.database import ranking_canal_anuncio_get, ranking_ativo_get, ranking_premios_get
     canal_id = ranking_canal_anuncio_get()
     ativo    = ranking_ativo_get()
+    premios  = ranking_premios_get()
+    premios_salas = premios["salas"]
+    premios_reais = premios["reais"]
+
     canal_txt = f"<#{canal_id}>" if canal_id else f"{OFF} *Não definido*"
     status    = f"{ON} **Ativo**" if ativo else f"{OFF} **Desativado**"
-    prox      = _fim_semana().strftime("%d/%m às 00:00")
-    prizes    = "\n".join(f"{MEDALHAS[i]} {i+1}° lugar → +{PREMIOS[i]} salas" for i in range(5))
 
-    em = discord.Embed(title=f"{TOP}  Ranking Semanal — Configuração", color=0xFFD700)
+    prizes = "\n".join(
+        f"{MEDALHAS[i]} {i+1}° lugar → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        for i in range(3)
+    )
+
+    em = discord.Embed(title=f"{TOP}  Ranking Diário — Configuração", color=0xFFD700)
     em.description = (
         f"{DOT} **Status:** {status}\n"
         f"{DOT} **Canal de anúncio:** {canal_txt}\n"
-        f"{DOT} **Reset automático:** toda segunda-feira 00:00 BRT\n"
-        f"{DOT} **Próximo reset:** {prox}\n\n"
-        f"**Prêmios (fixos):**\n{prizes}"
+        f"{DOT} **Reset automático:** todo dia às 23:59 BRT\n"
+        f"{DOT} **Próximo reset:** {_proximo_reset_str()}\n\n"
+        f"**Prêmios (configuráveis via botão abaixo):**\n{prizes}"
     )
-    em.set_footer(text="Prêmios são adicionados ao saldo (salas) de cada vencedor automaticamente.")
+    em.set_footer(text="Prêmios em salas são creditados automaticamente. R$ são pagos manualmente pelo admin.")
     return em
-
-
-# ── Views ─────────────────────────────────────────────────────────────────────
-
-class RankingPublicoView(discord.ui.View):
-    """View persistente postada no canal — 2 botões: Ranking (atualiza) e Meu Perfil (ephemeral V2)."""
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="Ranking",
-        emoji=PE["top"],
-        style=discord.ButtonStyle.primary,
-        custom_id="ranking:atualizar",
-    )
-    async def btn_ranking(self, inter: discord.Interaction, btn: discord.ui.Button):
-        """Mostra a tabela completa do top 10 num container V2 ephemeral."""
-        try:
-            from utils.database import top_criadores_semana
-            top10 = await asyncio.to_thread(top_criadores_semana, 10)
-            payload = _build_ranking_tabela_v2_payload(top10)
-            await _respond_v2_initial(inter.id, inter.token, payload)
-        except Exception as ex:
-            _log.warning(f"[ranking:atualizar] {ex}")
-            try:
-                if not inter.response.is_done():
-                    await inter.response.send_message(
-                        embed=_err("Erro ao carregar ranking.", f"`{ex}`"),
-                        ephemeral=True,
-                    )
-            except Exception:
-                pass
-
-    @discord.ui.button(
-        label="Meu Perfil",
-        emoji=PE["info"],
-        style=discord.ButtonStyle.secondary,
-        custom_id="ranking:perfil",
-    )
-    async def btn_perfil(self, inter: discord.Interaction, btn: discord.ui.Button):
-        """Mostra posição no ranking + salas criadas na semana + saldo (ephemeral V2)."""
-        try:
-            from utils.database import top_criadores_semana, saldo_total_usuario
-            uid = str(inter.user.id)
-
-            # Pega ranking completo (sem limite) pra calcular posição
-            todos = await asyncio.to_thread(top_criadores_semana, 0)
-            saldo = await asyncio.to_thread(saldo_total_usuario, uid)
-
-            posicao = None
-            salas_semana = 0
-            for idx, u in enumerate(todos, start=1):
-                if str(u.get("user_id")) == uid:
-                    posicao = idx
-                    salas_semana = u.get("total", 0)
-                    break
-
-            payload = _build_perfil_v2_payload(
-                inter.user, posicao, salas_semana, saldo, len(todos)
-            )
-            await _respond_v2_initial(inter.id, inter.token, payload)
-        except Exception as ex:
-            _log.warning(f"[ranking:perfil] {ex}")
-            try:
-                if not inter.response.is_done():
-                    await inter.response.send_message(
-                        embed=_err("Erro ao carregar perfil.", f"`{ex}`"),
-                        ephemeral=True,
-                    )
-            except Exception:
-                pass
 
 
 # ── Helpers Components V2 ────────────────────────────────────────────────────
 
 async def _respond_v2_initial(inter_id: int, inter_token: str, payload: dict) -> bool:
-    """POST resposta inicial V2 ephemeral.
-    Não usa defer antes (defer cria mensagem legacy e dá erro com flags V2)."""
     url = f"https://discord.com/api/v10/interactions/{inter_id}/{inter_token}/callback"
     body = {"type": 4, "data": payload}
     try:
@@ -376,39 +405,20 @@ async def _respond_v2_initial(inter_id: int, inter_token: str, payload: dict) ->
         return False
 
 
-async def _respond_v2_update(inter_id: int, inter_token: str, payload: dict) -> bool:
-    """POST UPDATE_MESSAGE (type 7) — edita a mensagem da interaction com payload V2."""
-    url = f"https://discord.com/api/v10/interactions/{inter_id}/{inter_token}/callback"
-    body = {"type": 7, "data": payload}
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(url, json=body, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                ok = r.status in (200, 204)
-                if not ok:
-                    _log.warning(f"[ranking v2 update] {r.status} {(await r.text())[:200]}")
-                return ok
-    except Exception as ex:
-        _log.error(f"[ranking v2 update] {ex}")
-        return False
-
-
 def _emj(key: str):
-    """Converte emoji do bot pro formato dict do Components V2."""
     em = PE.get(key)
     if not em:
         return None
     return {"id": str(em.id), "name": em.name, "animated": em.animated}
 
 
-def _build_perfil_v2_payload(user, posicao, salas_semana, saldo, total_participantes) -> dict:
-    """Container V2 do perfil pessoal de ranking."""
+def _build_perfil_v2_payload(user, posicao, salas_hoje, saldo, total_participantes) -> dict:
     nome = user.display_name
 
-    # Linha de posição (só emojis do bot)
     if posicao is None:
         pos_txt = (
-            f"{_em_str('off')} **Você ainda não criou salas esta semana**\n"
-            f"-# Crie sua primeira sala pra entrar no ranking!"
+            f"{_em_str('off')} **Você ainda não criou salas hoje**\n"
+            "-# Crie sua primeira sala pra entrar no ranking!"
         )
     else:
         if posicao == 1:
@@ -419,29 +429,20 @@ def _build_perfil_v2_payload(user, posicao, salas_semana, saldo, total_participa
             medalha = _em_str("swordbattle")
         else:
             medalha = _em_str("dot")
-        s = "s" if salas_semana != 1 else ""
+        s = "s" if salas_hoje != 1 else ""
         pos_txt = (
-            f"{medalha} **{posicao}º lugar** de 3k participantes\n"
-            f"-# Você criou **{salas_semana} sala{s}** esta semana"
+            f"{medalha} **{posicao}º lugar** de {total_participantes} participantes\n"
+            f"-# Você criou **{salas_hoje} sala{s}** hoje"
         )
-
-    # Próximo reset
-    prox = _fim_semana().strftime("%d/%m às 00:00")
 
     components = [{
         "id": 1,
         "type": 17,
         "accent_color": 0xFFD700,
         "components": [
-            {
-                "id": 2, "type": 10,
-                "content": f"## {_em_str('top')}  Perfil de {nome}",
-            },
+            {"id": 2, "type": 10, "content": f"## {_em_str('top')}  Perfil de {nome}"},
             {"id": 3, "type": 14, "divider": True, "spacing": 1},
-            {
-                "id": 4, "type": 10,
-                "content": pos_txt,
-            },
+            {"id": 4, "type": 10, "content": pos_txt},
             {"id": 5, "type": 14, "divider": True, "spacing": 1},
             {
                 "id": 6, "type": 10,
@@ -455,18 +456,142 @@ def _build_perfil_v2_payload(user, posicao, salas_semana, saldo, total_participa
                 "id": 8, "type": 10,
                 "content": (
                     f"{_em_str('gift')}  **Próximo Reset**\n"
-                    f"-# Toda segunda-feira às 00:00 BRT — próximo: **{prox}**"
+                    f"-# Todo dia às 23:59 BRT — próximo: **{_proximo_reset_str()}**"
                 ),
             },
         ],
     }]
-
-    # Flag 64 (ephemeral) | 32768 (Components V2)
     return {"flags": 64 | 32768, "components": components}
 
 
+# ── Modal de Configuração de Prêmios ─────────────────────────────────────────
+
+class _ModalPremiosRanking(discord.ui.Modal, title="Configurar Prêmios do Ranking"):
+    salas_input = discord.ui.TextInput(
+        label="Salas — Top1, Top2, Top3 (vírgula)",
+        placeholder="100,80,50",
+        required=True,
+        max_length=30,
+    )
+    reais_input = discord.ui.TextInput(
+        label="R$ — Top1, Top2, Top3 (vírgula)",
+        placeholder="7,5,4",
+        required=True,
+        max_length=30,
+    )
+
+    async def on_submit(self, inter: discord.Interaction):
+        try:
+            def _parse_ints(s):
+                return [int(x.strip()) for x in s.split(",") if x.strip().isdigit()]
+
+            def _parse_floats(s):
+                result = []
+                for x in s.split(","):
+                    x = x.strip().replace(",", ".")
+                    try:
+                        result.append(float(x))
+                    except ValueError:
+                        pass
+                return result
+
+            salas_list = _parse_ints(self.salas_input.value)
+            reais_list = _parse_floats(self.reais_input.value)
+
+            if len(salas_list) < 3 or len(reais_list) < 3:
+                return await inter.response.send_message(
+                    embed=_err(
+                        "Formato inválido.",
+                        "Use 3 valores separados por vírgula.\n"
+                        "Salas: `100,80,50`\nReais: `7,5,4`",
+                    ),
+                    ephemeral=True,
+                )
+
+            from utils.database import ranking_premios_set
+            await asyncio.to_thread(ranking_premios_set, salas_list[:3], reais_list[:3])
+            await inter.response.send_message(
+                embed=_ok(
+                    "Prêmios atualizados!",
+                    f"🥇 Top1: **{salas_list[0]} salas** + **R${reais_list[0]:.0f}**\n"
+                    f"🥈 Top2: **{salas_list[1]} salas** + **R${reais_list[1]:.0f}**\n"
+                    f"🥉 Top3: **{salas_list[2]} salas** + **R${reais_list[2]:.0f}**",
+                ),
+                ephemeral=True,
+            )
+        except Exception as ex:
+            _log.error(f"[ModalPremios] {ex}")
+            await inter.response.send_message(embed=_err("Erro.", f"`{ex}`"), ephemeral=True)
+
+
+# ── Views ─────────────────────────────────────────────────────────────────────
+
+class RankingPublicoView(discord.ui.View):
+    """View persistente postada no canal — botões Ranking e Meu Perfil."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Ranking",
+        emoji=PE["top"],
+        style=discord.ButtonStyle.primary,
+        custom_id="ranking:atualizar",
+    )
+    async def btn_ranking(self, inter: discord.Interaction, btn: discord.ui.Button):
+        try:
+            from utils.database import top_criadores_hoje, ranking_premios_get
+            top10   = await asyncio.to_thread(top_criadores_hoje, 10)
+            premios = await asyncio.to_thread(ranking_premios_get)
+            payload = _build_ranking_tabela_v2_payload(top10, premios)
+            await _respond_v2_initial(inter.id, inter.token, payload)
+        except Exception as ex:
+            _log.warning(f"[ranking:atualizar] {ex}")
+            try:
+                if not inter.response.is_done():
+                    await inter.response.send_message(
+                        embed=_err("Erro ao carregar ranking.", f"`{ex}`"), ephemeral=True
+                    )
+            except Exception:
+                pass
+
+    @discord.ui.button(
+        label="Meu Perfil",
+        emoji=PE["info"],
+        style=discord.ButtonStyle.secondary,
+        custom_id="ranking:perfil",
+    )
+    async def btn_perfil(self, inter: discord.Interaction, btn: discord.ui.Button):
+        try:
+            from utils.database import top_criadores_hoje, saldo_total_usuario
+            uid = str(inter.user.id)
+
+            todos = await asyncio.to_thread(top_criadores_hoje, 0)
+            saldo = await asyncio.to_thread(saldo_total_usuario, uid)
+
+            posicao = None
+            salas_hoje = 0
+            for idx, u in enumerate(todos, start=1):
+                if str(u.get("user_id")) == uid:
+                    posicao = idx
+                    salas_hoje = u.get("total", 0)
+                    break
+
+            payload = _build_perfil_v2_payload(inter.user, posicao, salas_hoje, saldo, len(todos))
+            await _respond_v2_initial(inter.id, inter.token, payload)
+        except Exception as ex:
+            _log.warning(f"[ranking:perfil] {ex}")
+            try:
+                if not inter.response.is_done():
+                    await inter.response.send_message(
+                        embed=_err("Erro ao carregar perfil.", f"`{ex}`"), ephemeral=True
+                    )
+            except Exception:
+                pass
+
+
 class RankingConfigView(discord.ui.View):
-    """Sub-painel de configuração (aberto via /botconfig → Ranking Semanal)."""
+    """Sub-painel de configuração (aberto via /botconfig → Ranking Diário)."""
 
     def __init__(self):
         super().__init__(timeout=180)
@@ -480,7 +605,7 @@ class RankingConfigView(discord.ui.View):
             st = "ativado ✅" if novo else "desativado ❌"
             em_cfg = await asyncio.to_thread(_build_config_embed)
             await inter.response.edit_message(embed=em_cfg, view=self)
-            await inter.followup.send(embed=_ok(f"Ranking semanal {st}!"), ephemeral=True)
+            await inter.followup.send(embed=_ok(f"Ranking diário {st}!"), ephemeral=True)
         except Exception as ex:
             _log.error(f"[ranking:toggle] {ex}")
             try:
@@ -493,51 +618,104 @@ class RankingConfigView(discord.ui.View):
         try:
             em = _info(
                 "Canal de Anúncio do Ranking",
-                "Selecione o canal onde o bot vai anunciar os vencedores toda segunda-feira.",
+                "Selecione o canal onde o bot vai anunciar os vencedores todo dia às 23:59 BRT.",
             )
             await inter.response.send_message(embed=em, view=_RankingCanalSelectView(), ephemeral=True)
         except Exception as ex:
             _log.error(f"[ranking:canal] {ex}")
 
-    @discord.ui.button(label="Ver Top 5 Atual", emoji="📊", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_top5(self, inter: discord.Interaction, btn: discord.ui.Button):
+    @discord.ui.button(label="Ver Top 3 Atual", emoji="📊", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_top3(self, inter: discord.Interaction, btn: discord.ui.Button):
         try:
             await inter.response.defer(ephemeral=True)
-            from utils.database import top_criadores_semana
-            top5 = await asyncio.to_thread(top_criadores_semana, 5)
-            em   = _build_ranking_embed(top5)
-            em.title  = "📊  Top 5 Atual (Prévia Admin)"
-            em.color  = config.COR_INFO
+            from utils.database import top_criadores_hoje, ranking_premios_get
+            top3    = await asyncio.to_thread(top_criadores_hoje, 3)
+            premios = await asyncio.to_thread(ranking_premios_get)
+            em      = _build_ranking_embed(top3, premios)
+            em.title = "📊  Top 3 Atual (Prévia Admin)"
+            em.color = config.COR_INFO
             await inter.followup.send(embed=em, ephemeral=True)
         except Exception as ex:
-            _log.error(f"[ranking:top5] {ex}")
+            _log.error(f"[ranking:top3] {ex}")
             try:
                 await inter.followup.send(embed=_err("Erro.", f"`{ex}`"), ephemeral=True)
             except Exception:
                 pass
 
-    @discord.ui.button(label="⚡ Forçar Reset Agora", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="Configurar Premios", emoji="⚙️", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_premios(self, inter: discord.Interaction, btn: discord.ui.Button):
+        try:
+            await inter.response.send_modal(_ModalPremiosRanking())
+        except Exception as ex:
+            _log.error(f"[ranking:premios_btn] {ex}")
+            try:
+                await inter.response.send_message(embed=_err("Erro.", f"`{ex}`"), ephemeral=True)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="Ver Previa Top 3", emoji="🖼️", style=discord.ButtonStyle.primary, row=1)
+    async def btn_previa(self, inter: discord.Interaction, btn: discord.ui.Button):
+        try:
+            await inter.response.defer(ephemeral=True)
+            from utils.database import top_criadores_hoje, ranking_premios_get
+            top3    = await asyncio.to_thread(top_criadores_hoje, 3)
+            premios = await asyncio.to_thread(ranking_premios_get)
+            img_bytes = await asyncio.to_thread(
+                _gerar_imagem_top3, top3, premios["salas"], premios["reais"]
+            )
+            if img_bytes:
+                f = discord.File(io.BytesIO(img_bytes), filename="ranking_previa.png")
+                await inter.followup.send(
+                    embed=_info("Prévia do Ranking Diário", "Assim ficará o anúncio às 23:59 BRT."),
+                    file=f,
+                    ephemeral=True,
+                )
+            else:
+                await inter.followup.send(
+                    embed=_err("Imagem indisponível.", "PIL (Pillow) não está instalado no servidor."),
+                    ephemeral=True,
+                )
+        except Exception as ex:
+            _log.error(f"[ranking:previa] {ex}")
+            try:
+                await inter.followup.send(embed=_err("Erro.", f"`{ex}`"), ephemeral=True)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="⚡ Forçar Reset Agora", style=discord.ButtonStyle.danger, row=2)
     async def btn_reset(self, inter: discord.Interaction, btn: discord.ui.Button):
         try:
             await inter.response.defer(ephemeral=True)
             from utils.database import (
-                top_criadores_semana, distribuir_premios_ranking,
+                top_criadores_hoje, distribuir_premios_diario,
                 ranking_canal_anuncio_get, ranking_ultimo_reset_set,
+                ranking_premios_get,
             )
-            top5 = await asyncio.to_thread(top_criadores_semana, 5)
-            if not top5:
+            top3 = await asyncio.to_thread(top_criadores_hoje, 3)
+            if not top3:
                 return await inter.followup.send(
-                    embed=_err("Nenhum participante esta semana."), ephemeral=True
+                    embed=_err("Nenhum participante hoje."), ephemeral=True
                 )
 
-            resultados = await asyncio.to_thread(distribuir_premios_ranking, top5)
+            premios       = await asyncio.to_thread(ranking_premios_get)
+            premios_salas = premios["salas"]
+            premios_reais = premios["reais"]
+            resultados    = await asyncio.to_thread(distribuir_premios_diario, top3)
 
             canal_id = await asyncio.to_thread(ranking_canal_anuncio_get)
             if canal_id:
                 canal = inter.client.get_channel(int(canal_id))
                 if canal:
-                    inicio = _inicio_semana()
-                    await canal.send(embed=_build_vencedores_embed(top5, _semana_str(inicio)))
+                    dia_str   = datetime.now(_BR).strftime("%d/%m/%Y")
+                    em_venc   = _build_vencedores_embed(top3, dia_str, premios_salas, premios_reais)
+                    img_bytes = await asyncio.to_thread(
+                        _gerar_imagem_top3, top3, premios_salas, premios_reais
+                    )
+                    if img_bytes:
+                        f = discord.File(io.BytesIO(img_bytes), filename="ranking_top3.png")
+                        await canal.send(embed=em_venc, file=f)
+                    else:
+                        await canal.send(embed=em_venc)
 
             await asyncio.to_thread(ranking_ultimo_reset_set, datetime.now(_BR).isoformat())
 
@@ -596,13 +774,12 @@ async def postar_ranking_canal(inter: discord.Interaction):
         if not _is_admin(inter.user.id):
             return await inter.response.send_message(embed=_err("Sem permissão."), ephemeral=True)
         await inter.response.defer(ephemeral=True)
-        from utils.database import top_criadores_semana
-        top10 = await asyncio.to_thread(top_criadores_semana, 10)
+        from utils.database import top_criadores_hoje
+        top10   = await asyncio.to_thread(top_criadores_hoje, 10)
         payload = _build_ranking_v2_payload(top10)
 
-        # Posta via HTTP raw porque discord.py não suporta a flag V2 em channel.send
-        token = config.DISCORD_TOKEN
-        url = f"https://discord.com/api/v10/channels/{inter.channel.id}/messages"
+        token   = config.DISCORD_TOKEN
+        url     = f"https://discord.com/api/v10/channels/{inter.channel.id}/messages"
         headers = {"Authorization": f"Bot {token}", "Content-Type": "application/json"}
         async with aiohttp.ClientSession() as s:
             async with s.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
@@ -614,14 +791,14 @@ async def postar_ranking_canal(inter: discord.Interaction):
                         ephemeral=True,
                     )
 
-        await inter.followup.send(embed=_ok("Painel de ranking postado no canal!"), ephemeral=True)
+        await inter.followup.send(embed=_ok("Painel de ranking diário postado no canal!"), ephemeral=True)
     except Exception as ex:
         _log.error(f"[postar_ranking_canal] {ex}")
         try:
             await inter.followup.send(embed=_err("Erro ao postar ranking.", f"`{ex}`"), ephemeral=True)
         except Exception:
             try:
-                await inter.response.send_message(embed=_err("Erro ao postar ranking.", f"`{ex}`"), ephemeral=True)
+                await inter.response.send_message(embed=_err("Erro.", f"`{ex}`"), ephemeral=True)
             except Exception:
                 pass
 
@@ -632,9 +809,10 @@ async def ver_ranking_ephemeral(inter: discord.Interaction):
         if not _is_admin(inter.user.id):
             return await inter.response.send_message(embed=_err("Sem permissão."), ephemeral=True)
         await inter.response.defer(ephemeral=True)
-        from utils.database import top_criadores_semana
-        top10 = await asyncio.to_thread(top_criadores_semana, 10)
-        em    = _build_ranking_embed(top10)
+        from utils.database import top_criadores_hoje, ranking_premios_get
+        top10   = await asyncio.to_thread(top_criadores_hoje, 10)
+        premios = await asyncio.to_thread(ranking_premios_get)
+        em      = _build_ranking_embed(top10, premios)
         em.title = "📊  Top 10 Atual (Prévia Admin)"
         em.color = config.COR_INFO
         await inter.followup.send(embed=em, ephemeral=True)
@@ -678,9 +856,9 @@ class RankingCog(commands.Cog):
     def cog_unload(self):
         self._check_task.cancel()
 
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=1)
     async def _check_task(self):
-        """Verifica toda hora se é segunda 00:xx BRT para fazer o reset."""
+        """Verifica todo minuto se é 23:59 BRT para fazer o reset diário."""
         await self.bot.wait_until_ready()
         try:
             from utils.database import ranking_ativo_get, ranking_ultimo_reset_get, ranking_ultimo_reset_set
@@ -689,15 +867,15 @@ class RankingCog(commands.Cog):
                 return
 
             agora = datetime.now(_BR)
-            if agora.weekday() != 0 or agora.hour > 1:   # só segunda, primeiras 2h
+            if not (agora.hour == 23 and agora.minute == 59):
                 return
 
-            inicio_semana = _inicio_semana().isoformat()
-            ultimo = await asyncio.to_thread(ranking_ultimo_reset_get)
-            if ultimo and ultimo >= inicio_semana:
-                return   # já resetou essa semana
+            hoje_str = agora.strftime("%Y-%m-%d")
+            ultimo   = await asyncio.to_thread(ranking_ultimo_reset_get)
+            if ultimo and ultimo[:10] >= hoje_str:
+                return  # já fez o reset hoje
 
-            _log.info("[ranking] Iniciando reset semanal automático…")
+            _log.info("[ranking] Iniciando reset diário automático…")
             await self._executar_reset()
             await asyncio.to_thread(ranking_ultimo_reset_set, datetime.now(_BR).isoformat())
 
@@ -711,15 +889,21 @@ class RankingCog(commands.Cog):
     async def _executar_reset(self):
         try:
             from utils.database import (
-                top_criadores_semana, distribuir_premios_ranking, ranking_canal_anuncio_get,
+                top_criadores_hoje, distribuir_premios_diario,
+                ranking_canal_anuncio_get, ranking_premios_get,
             )
-            top5 = await asyncio.to_thread(top_criadores_semana, 5)
-            if not top5:
-                _log.info("[ranking] Reset: nenhum participante.")
+
+            top3 = await asyncio.to_thread(top_criadores_hoje, 3)
+            if not top3:
+                _log.info("[ranking] Reset diário: nenhum participante hoje.")
                 return
 
-            resultados = await asyncio.to_thread(distribuir_premios_ranking, top5)
-            _log.info(f"[ranking] Prêmios: {resultados}")
+            premios       = await asyncio.to_thread(ranking_premios_get)
+            premios_salas = premios["salas"]
+            premios_reais = premios["reais"]
+
+            resultados = await asyncio.to_thread(distribuir_premios_diario, top3)
+            _log.info(f"[ranking] Prêmios distribuídos: {resultados}")
 
             canal_id = await asyncio.to_thread(ranking_canal_anuncio_get)
             if not canal_id:
@@ -731,10 +915,17 @@ class RankingCog(commands.Cog):
                 _log.warning(f"[ranking] Canal {canal_id} não encontrado.")
                 return
 
-            inicio_ant = _inicio_semana() - timedelta(days=7)
-            em = _build_vencedores_embed(top5, _semana_str(inicio_ant))
-            await canal.send(embed=em)
-            _log.info(f"[ranking] Anúncio enviado em #{canal.name}")
+            dia_str   = datetime.now(_BR).strftime("%d/%m/%Y")
+            em        = _build_vencedores_embed(top3, dia_str, premios_salas, premios_reais)
+            img_bytes = await asyncio.to_thread(_gerar_imagem_top3, top3, premios_salas, premios_reais)
+
+            if img_bytes:
+                f = discord.File(io.BytesIO(img_bytes), filename="ranking_top3.png")
+                await canal.send(embed=em, file=f)
+            else:
+                await canal.send(embed=em)
+
+            _log.info(f"[ranking] Anúncio diário enviado em #{canal.name}")
 
         except Exception as ex:
             _log.error(f"[ranking._executar_reset] {ex}")

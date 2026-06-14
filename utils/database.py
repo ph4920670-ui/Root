@@ -2016,6 +2016,73 @@ def distribuir_premios_ranking(top5: list) -> list:
     return resultados
 
 
+# ── Ranking diário ────────────────────────────────────────────────────────────
+
+_PREMIOS_SALAS_DEFAULT = [100, 80, 50]
+_PREMIOS_REAIS_DEFAULT = [7.0, 5.0, 4.0]
+
+
+def _inicio_dia_db() -> str:
+    agora = datetime.now(BRASILIA)
+    return agora.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+def top_criadores_hoje(limite: int = 10) -> list:
+    desde = _inicio_dia_db()
+    try:
+        res = get_db().table("salas").select("user_id,user_nome,criado_em").gte("criado_em", desde).execute()
+        totais: dict = {}
+        for s in (res.data or []):
+            uid   = s.get("user_id", "?")
+            unome = s.get("user_nome") or "Desconhecido"
+            if uid not in totais:
+                totais[uid] = {"user_id": uid, "user_nome": unome, "total": 0}
+            totais[uid]["total"] += 1
+        result = sorted(totais.values(), key=lambda x: x["total"], reverse=True)
+        return result[:limite] if limite else result
+    except Exception as e:
+        _log.error(f"[top_criadores_hoje] {e}")
+        return []
+
+
+def ranking_premios_get() -> dict:
+    """Retorna prêmios configurados: {'salas': [100, 80, 50], 'reais': [7.0, 5.0, 4.0]}"""
+    try:
+        cfg = botconfig_load() or {}
+        salas = cfg.get("ranking_premios_salas") or _PREMIOS_SALAS_DEFAULT
+        reais = cfg.get("ranking_premios_reais") or _PREMIOS_REAIS_DEFAULT
+        return {"salas": list(salas[:3]), "reais": [float(r) for r in reais[:3]]}
+    except Exception as e:
+        _log.error(f"[ranking_premios_get] {e}")
+        return {"salas": list(_PREMIOS_SALAS_DEFAULT), "reais": list(_PREMIOS_REAIS_DEFAULT)}
+
+
+def ranking_premios_set(salas: list, reais: list):
+    try:
+        cfg = botconfig_load() or {}
+        cfg["ranking_premios_salas"] = [int(s) for s in salas[:3]]
+        cfg["ranking_premios_reais"] = [float(r) for r in reais[:3]]
+        botconfig_save(cfg)
+    except Exception as e:
+        _log.error(f"[ranking_premios_set] {e}")
+
+
+def distribuir_premios_diario(top3: list) -> list:
+    """Distribui salas para o top 3 do dia com prêmios configuráveis."""
+    premios = ranking_premios_get()
+    premios_salas = premios["salas"]
+    resultados = []
+    for idx, u in enumerate(top3[:3]):
+        if idx >= len(premios_salas):
+            break
+        premio = premios_salas[idx]
+        uid    = u["user_id"]
+        unome  = u.get("user_nome") or "Desconhecido"
+        adicionar_saldo_usuario(uid, unome, premio, "ranking")
+        resultados.append((uid, unome, premio))
+    return resultados
+
+
 def ranking_canal_anuncio_get() -> int | None:
     try:
         v = (botconfig_load() or {}).get("ranking_canal_anuncio")
