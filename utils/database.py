@@ -86,7 +86,7 @@ class _SupabaseCollectionCompat:
             _log.error(f"[compat find_one:{self._t}] {e}")
             return None
 
-    def find(self, query: dict = None, projection: dict = None) -> list:
+    def find(self, query: dict = None, projection: dict = None, limit: int = None) -> "_FindResultList":
         try:
             q = get_db().table(self._t).select("*")
             for k, v in (query or {}).items():
@@ -100,17 +100,26 @@ class _SupabaseCollectionCompat:
                         if op == "$exists":
                             if val:
                                 q = q.not_.is_(k, "null")
+                            else:
+                                q = q.is_(k, "null")
                         elif op == "$ne":
-                            q = q.neq(k, val)
+                            if val is None:
+                                q = q.not_.is_(k, "null")
+                            else:
+                                q = q.neq(k, val)
                         elif op == "$gte":
                             q = q.gte(k, val)
+                        elif op == "$lt":
+                            q = q.lt(k, val)
                 else:
                     q = q.eq(k, v)
+            if limit:
+                q = q.limit(limit)
             res = q.execute()
-            return res.data or []
+            return _FindResultList(res.data or [])
         except Exception as e:
             _log.error(f"[compat find:{self._t}] {e}")
-            return []
+            return _FindResultList()
 
     def update_one(self, query: dict, update: dict, upsert: bool = False):
         try:
@@ -171,6 +180,20 @@ class _SupabaseCollectionCompat:
 
     def create_index(self, *args, **kwargs):
         pass  # índices criados via SQL schema
+
+
+class _FindResultList(list):
+    """List subclass retornado por find() que suporta .sort(field, dir).limit(n)."""
+    def sort(self, field=None, direction=1, *args, **kwargs):
+        if field is None:
+            super().sort(*args, **kwargs)
+            return None
+        reverse = (direction == -1)
+        self[:] = sorted(self, key=lambda x: (x.get(field) or ""), reverse=reverse)
+        return self
+
+    def limit(self, n: int):
+        return _FindResultList(self[:n])
 
 
 class _SupabaseDBCompat:
@@ -1269,7 +1292,7 @@ _guild_lock = Lock()
 def guild_config_get(guild_id: str) -> dict:
     try:
         res = get_db().table("guild_config").select("*").eq("id", str(guild_id)).maybe_single().execute()
-        if res.data:
+        if res and res.data:
             return res.data
     except Exception as e:
         _log.error(f"[guild_config_get] {e}")
@@ -1680,7 +1703,7 @@ def meta_progresso(user_id: str) -> dict | None:
 def token_mode_get(user_id: str) -> dict:
     try:
         res = get_db().table("users_config").select("user_token,token_mode_ativo").eq("user_id", str(user_id)).maybe_single().execute()
-        doc = res.data or {}
+        doc = (res and res.data) or {}
         return {"token": doc.get("user_token"), "ativo": bool(doc.get("token_mode_ativo", False))}
     except Exception as e:
         _log.error(f"[token_mode_get] {e}")
