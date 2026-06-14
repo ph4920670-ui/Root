@@ -3966,10 +3966,11 @@ class _ModalRemoverSalas(discord.ui.Modal, title="🗑️ Remover Salas"):
         await i.response.send_message(embed=em, view=AdmSelectView(self), ephemeral=True)
 
     # /painelglobal
-    @app_commands.guilds(*[discord.Object(id=g) for g in config.OWNER_GUILD_IDS])
+    @app_commands.guilds(*_ADMIN_GUILDS)
     @app_commands.allowed_installs(guilds=True, users=False)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.command(name="painelglobal", description="[ADMIN] Central de painéis: criação, config e postagem.")
+    @app_commands.guilds(*[discord.Object(id=g) for g in config.OWNER_GUILD_IDS])
     async def cmd_painelglobal(self, i: discord.Interaction):
         import logging as _lg_pg
         _log_pg = _lg_pg.getLogger("salasff.painelglobal")
