@@ -320,7 +320,7 @@ class ComprarCog(commands.Cog):
         try:
             from utils.database import expirar_pedidos_velhos
             await asyncio.to_thread(expirar_pedidos_velhos)
-            pend = pedidos_pendentes()
+            pend = await asyncio.to_thread(pedidos_pendentes)
             if not pend: return
             from utils.pix import consultar_cobranca_async
             async def chk(p):
@@ -356,7 +356,9 @@ class ComprarCog(commands.Cog):
             pass
 
         # Marca como pago já com os extras (pra aparecer em /usuarioconfig e Meu Perfil)
-        confirmar_pedido_pix(p["txid"], nome_pagador=nome_pagador, endtoend=txid_real)
+        await asyncio.to_thread(
+            confirmar_pedido_pix, p["txid"], nome_pagador=nome_pagador, endtoend=txid_real
+        )
 
         # ID que aparece no log: endToEndId real se disponível, senão o txid local
         txid_log = txid_real or p["txid"]
@@ -368,7 +370,7 @@ class ComprarCog(commands.Cog):
             from utils.database import guild_adicionar_saldo
             guild_id = uid.replace("guild_", "")
             novo_saldo = await asyncio.to_thread(guild_adicionar_saldo, guild_id, p["quantia"])
-            salvar_key_pedido(p["txid"], f"guild:{guild_id}")
+            await asyncio.to_thread(salvar_key_pedido, p["txid"], f"guild:{guild_id}")
 
             # Tenta notificar no servidor
             try:
@@ -450,7 +452,7 @@ class ComprarCog(commands.Cog):
         # Compra normal de usuário
         from utils.database import adicionar_saldo_usuario
         code = await asyncio.to_thread(adicionar_saldo_usuario, uid, p["user_nome"], p["quantia"])
-        salvar_key_pedido(p["txid"], code)
+        await asyncio.to_thread(salvar_key_pedido, p["txid"], code)
 
         # Sempre registra a compra no sistema de bônus (acumula para resgatar via /c → Bônus)
         try:

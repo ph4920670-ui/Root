@@ -628,19 +628,25 @@ class RankingPublicoView(discord.ui.View):
         custom_id="ranking:atualizar",
     )
     async def btn_ranking(self, inter: discord.Interaction, btn: discord.ui.Button):
+        # ACK imediato (sem trabalho de DB antes) para não estourar os 3s.
+        try:
+            await inter.response.defer(ephemeral=True, thinking=True)
+        except Exception:
+            pass
         try:
             from utils.database import top_criadores_hoje, ranking_premios_get
             top10   = await asyncio.to_thread(top_criadores_hoje, 10)
             premios = await asyncio.to_thread(ranking_premios_get)
             payload = _build_ranking_tabela_v2_payload(top10, premios)
-            await _respond_v2_initial(inter.id, inter.token, payload)
+            ok = await _followup_v2(inter.client.application_id, inter.token, payload)
+            if not ok:
+                await inter.followup.send(embed=_err("Erro ao carregar ranking."), ephemeral=True)
         except Exception as ex:
             _log.warning(f"[ranking:atualizar] {ex}")
             try:
-                if not inter.response.is_done():
-                    await inter.response.send_message(
-                        embed=_err("Erro ao carregar ranking.", f"`{ex}`"), ephemeral=True
-                    )
+                await inter.followup.send(
+                    embed=_err("Erro ao carregar ranking.", f"`{ex}`"), ephemeral=True
+                )
             except Exception:
                 pass
 
@@ -651,6 +657,11 @@ class RankingPublicoView(discord.ui.View):
         custom_id="ranking:perfil",
     )
     async def btn_perfil(self, inter: discord.Interaction, btn: discord.ui.Button):
+        # ACK imediato (sem trabalho de DB antes) para não estourar os 3s.
+        try:
+            await inter.response.defer(ephemeral=True, thinking=True)
+        except Exception:
+            pass
         try:
             from utils.database import top_criadores_hoje, saldo_total_usuario
             uid = str(inter.user.id)
@@ -667,14 +678,15 @@ class RankingPublicoView(discord.ui.View):
                     break
 
             payload = _build_perfil_v2_payload(inter.user, posicao, salas_hoje, saldo, len(todos))
-            await _respond_v2_initial(inter.id, inter.token, payload)
+            ok = await _followup_v2(inter.client.application_id, inter.token, payload)
+            if not ok:
+                await inter.followup.send(embed=_err("Erro ao carregar perfil."), ephemeral=True)
         except Exception as ex:
             _log.warning(f"[ranking:perfil] {ex}")
             try:
-                if not inter.response.is_done():
-                    await inter.response.send_message(
-                        embed=_err("Erro ao carregar perfil.", f"`{ex}`"), ephemeral=True
-                    )
+                await inter.followup.send(
+                    embed=_err("Erro ao carregar perfil.", f"`{ex}`"), ephemeral=True
+                )
             except Exception:
                 pass
 
