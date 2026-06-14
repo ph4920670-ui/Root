@@ -505,11 +505,13 @@ def _sincronizar_pendentes(user_id, user_nome):
     """Sincroniza keys com dono PENDENTE_ para o user_id real."""
     try:
         nome_lower = user_nome.lower().strip()
-        keys = _all("keys", "id,dono_id,dono_nome")
+        # Filtra direto no Supabase — evita paginar 10k+ rows
+        res = get_db().table("keys").select("id,dono_id,dono_nome").filter(
+            "dono_id", "like", "PENDENTE_%"
+        ).execute()
+        keys = res.data or []
         for k in keys:
             dono = k.get("dono_id") or ""
-            if not dono.startswith("PENDENTE_"):
-                continue
             nome_key = dono.replace("PENDENTE_", "").replace("_", " ").lower().strip()
             if nome_key == nome_lower or (k.get("dono_nome") or "").lower().strip() == nome_lower:
                 get_db().table("keys").update({
