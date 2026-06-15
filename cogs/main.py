@@ -3610,7 +3610,7 @@ class MainCog(commands.Cog):
 
         from cogs.botconfig import (
             carregar_cfg, salvar_cfg,
-            get_promo_ativa, _build_promo_v2_payload, _post_promo_v2,
+            get_promo_ativa, _post_promo_v2, _em as _bc_em,
         )
         from utils.database import botconfig_save
         from utils.pix import get_preco_por_sala
@@ -3692,10 +3692,50 @@ class MainCog(commands.Cog):
         await asyncio.to_thread(salvar_cfg, cfg)
         await asyncio.to_thread(botconfig_save, cfg)
 
-        # Envia promo V2 agora neste canal
+        # Envia promo V2 agora neste canal (payload inline — evita bug de content vazio)
+        ate_hora_str = f"{h:02d}:{m:02d}"
+        canal_id_compras = cfg.get("canal_compras_pub_id")
+        canal_txt = f"<#{canal_id_compras}>" if canal_id_compras else "**#compras**"
+        if cts is not None:
+            _inner = [
+                {"id": 1, "type": 10, "content": f"## {_bc_em('rage')} MEGA PROMOÇÃO — SALAS A {cts} CENTAVOS!"},
+                {"id": 2, "type": 10, "content": (
+                    f"{_bc_em('awaiting')} **Promoção válida somente até às {ate_hora_str} BRT!**\n"
+                    "-# Após encerrar, o preço volta ao normal. Não perca!"
+                )},
+                {"id": 3, "type": 14, "divider": True, "spacing": 1},
+                {"id": 4, "type": 10, "content": (
+                    f"{_bc_em('otherdollar')} **PREÇO ESPECIAL:** R$ {cts/100:.2f}/sala\n"
+                    f"{_bc_em('clockcheck')} **Encerra às:** {ate_hora_str} BRT\n"
+                    f"{_bc_em('channel')} **Compre aqui:** {canal_txt}"
+                )},
+                {"id": 5, "type": 10, "content": "-# @everyone"},
+            ]
+            _accent = 0xED4245
+        else:
+            _preco_r = preco_atual_cts / 100
+            _inner = [
+                {"id": 1, "type": 10, "content": f"## {_bc_em('swordbattle')} COMPRE SALAS AGORA"},
+                {"id": 2, "type": 10, "content": (
+                    f"{_bc_em('awaiting')} **Promoção válida somente até às {ate_hora_str} BRT!**\n"
+                    "-# Não perca!"
+                )},
+                {"id": 3, "type": 14, "divider": True, "spacing": 1},
+                {"id": 4, "type": 10, "content": (
+                    f"{_bc_em('otherdollar')} **Preço:** R$ {_preco_r:.2f}/sala\n"
+                    f"{_bc_em('clockcheck')} **Encerra às:** {ate_hora_str} BRT\n"
+                    f"{_bc_em('channel')} **Compre aqui:** {canal_txt}"
+                )},
+                {"id": 5, "type": 10, "content": "-# @everyone"},
+            ]
+            _accent = 0xFFD700
+        _payload_aa = {
+            "content": "@everyone",
+            "flags": 32768,
+            "components": [{"id": 0, "type": 17, "accent_color": _accent, "components": _inner}],
+        }
         try:
-            payload = await asyncio.to_thread(_build_promo_v2_payload, "", True)
-            await _post_promo_v2(ctx.channel.id, payload)
+            await _post_promo_v2(ctx.channel.id, _payload_aa)
         except Exception as _ex:
             _log.warning(f"[+aa] erro enviando promo inicial: {_ex}")
 

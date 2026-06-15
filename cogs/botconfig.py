@@ -2338,7 +2338,50 @@ class BotConfigCog(commands.Cog):
                     except Exception:
                         pass
 
-                payload = await asyncio.to_thread(_build_promo_v2_payload, "", True)
+                # Build payload inline — evita bug de content vazio
+                _promo_cts  = promo.get("preco_centavos")
+                _ate_str    = promo.get("ate_hora", "?")
+                _cfg_loop   = await asyncio.to_thread(carregar_cfg)
+                _cid_comp   = _cfg_loop.get("canal_compras_pub_id")
+                _canal_txt  = f"<#{_cid_comp}>" if _cid_comp else "**#compras**"
+                if _promo_cts is not None:
+                    _inner = [
+                        {"id": 1, "type": 10, "content": f"## {_em('rage')} MEGA PROMOÇÃO — SALAS A {_promo_cts} CENTAVOS!"},
+                        {"id": 2, "type": 10, "content": (
+                            f"{_em('awaiting')} **Promoção válida somente até às {_ate_str} BRT!**\n"
+                            "-# Após encerrar, o preço volta ao normal. Não perca!"
+                        )},
+                        {"id": 3, "type": 14, "divider": True, "spacing": 1},
+                        {"id": 4, "type": 10, "content": (
+                            f"{_em('otherdollar')} **PREÇO ESPECIAL:** R$ {_promo_cts/100:.2f}/sala\n"
+                            f"{_em('clockcheck')} **Encerra às:** {_ate_str} BRT\n"
+                            f"{_em('channel')} **Compre aqui:** {_canal_txt}"
+                        )},
+                        {"id": 5, "type": 10, "content": "-# @everyone"},
+                    ]
+                    _accent = 0xED4245
+                else:
+                    _preco_r = _cfg_loop.get("preco_por_sala", 0.09)
+                    _inner = [
+                        {"id": 1, "type": 10, "content": f"## {_em('swordbattle')} COMPRE SALAS AGORA"},
+                        {"id": 2, "type": 10, "content": (
+                            f"{_em('awaiting')} **Promoção válida somente até às {_ate_str} BRT!**\n"
+                            "-# Não perca!"
+                        )},
+                        {"id": 3, "type": 14, "divider": True, "spacing": 1},
+                        {"id": 4, "type": 10, "content": (
+                            f"{_em('otherdollar')} **Preço:** R$ {_preco_r:.2f}/sala\n"
+                            f"{_em('clockcheck')} **Encerra às:** {_ate_str} BRT\n"
+                            f"{_em('channel')} **Compre aqui:** {_canal_txt}"
+                        )},
+                        {"id": 5, "type": 10, "content": "-# @everyone"},
+                    ]
+                    _accent = 0xFFD700
+                payload = {
+                    "content": "@everyone",
+                    "flags": 32768,
+                    "components": [{"id": 0, "type": 17, "accent_color": _accent, "components": _inner}],
+                }
                 nova_id = await _post_promo_v2(canal_id, payload)
                 if nova_id:
                     ultima_msg_id = nova_id
