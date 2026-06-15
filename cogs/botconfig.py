@@ -2057,6 +2057,24 @@ async def dar_cargo_comprador(bot, guild_id, user_id, quantia):
 
 _log = logging.getLogger("salasff.msgauto")
 
+def get_promo_ativa() -> dict | None:
+    return carregar_cfg().get("mega_promo")
+
+def set_promo_ativa(ate_hora: str, preco_centavos: int, preco_original_centavos: int):
+    cfg = carregar_cfg()
+    cfg["mega_promo"] = {
+        "ate_hora": ate_hora,
+        "preco_centavos": preco_centavos,
+        "preco_original_centavos": preco_original_centavos,
+    }
+    salvar_cfg(cfg)
+
+def clear_promo_ativa():
+    cfg = carregar_cfg()
+    cfg.pop("mega_promo", None)
+    salvar_cfg(cfg)
+
+
 # ── Promo V2 ──────────────────────────────────────────────────────────────────
 
 def _em(key: str) -> str:
@@ -2068,42 +2086,72 @@ def _em(key: str) -> str:
 
 
 def _build_promo_v2_payload(mensagem: str, mencionar: bool = True) -> dict:
-    """Monta payload Components V2 da mensagem promo."""
+    """Monta payload Components V2 da mensagem promo (normal ou mega promoção)."""
     from utils.pix import get_preco_por_sala
     preco = get_preco_por_sala()
     cfg   = carregar_cfg()
     canal_id_compras = cfg.get("canal_compras_pub_id")
-    canal_txt = f"<#{canal_id_compras}>" if canal_id_compras else "**#compras**"
-
+    canal_txt  = f"<#{canal_id_compras}>" if canal_id_compras else "**#compras**"
+    promo_ativa = cfg.get("mega_promo")
     mention = "@everyone" if mencionar else ""
 
-    inner = [
-        {
-            "id": 1, "type": 10,
-            "content": f"## {_em('swordbattle')} COMPRE SALAS AGORA",
-        },
-        {
-            "id": 2, "type": 10,
-            "content": mensagem,
-        },
-        {"id": 3, "type": 14, "divider": True, "spacing": 1},
-        {
-            "id": 4, "type": 10,
-            "content": (
-                f"{_em('otherdollar')} **Preço:** R$ {preco:.2f}/sala\n"
-                f"{_em('channel')} **Compre aqui:** {canal_txt}"
-            ),
-        },
-    ]
+    if promo_ativa:
+        ate_hora  = promo_ativa.get("ate_hora", "?")
+        preco_cts = promo_ativa.get("preco_centavos", round(preco * 100))
+        inner = [
+            {
+                "id": 1, "type": 10,
+                "content": f"## {_em('rage')} MEGA PROMOÇÃO — SALAS A {preco_cts} CENTAVOS!",
+            },
+            {
+                "id": 2, "type": 10,
+                "content": (
+                    f"{mensagem}\n\n"
+                    f"{_em('awaiting')} **Promoção válida somente até às {ate_hora} BRT!**\n"
+                    "-# Após encerrar, o preço volta ao normal. Não perca!"
+                ),
+            },
+            {"id": 3, "type": 14, "divider": True, "spacing": 1},
+            {
+                "id": 4, "type": 10,
+                "content": (
+                    f"{_em('otherdollar')} **PREÇO ESPECIAL:** R$ {preco_cts/100:.2f}/sala\n"
+                    f"{_em('clockcheck')} **Encerra às:** {ate_hora} BRT\n"
+                    f"{_em('channel')} **Compre aqui:** {canal_txt}"
+                ),
+            },
+        ]
+        accent = 0xED4245  # vermelho — urgência
+    else:
+        inner = [
+            {
+                "id": 1, "type": 10,
+                "content": f"## {_em('swordbattle')} COMPRE SALAS AGORA",
+            },
+            {
+                "id": 2, "type": 10,
+                "content": mensagem,
+            },
+            {"id": 3, "type": 14, "divider": True, "spacing": 1},
+            {
+                "id": 4, "type": 10,
+                "content": (
+                    f"{_em('otherdollar')} **Preço:** R$ {preco:.2f}/sala\n"
+                    f"{_em('channel')} **Compre aqui:** {canal_txt}"
+                ),
+            },
+        ]
+        accent = 0xFFD700
+
     if mention:
         inner.append({"id": 5, "type": 10, "content": f"-# {mention}"})
 
     payload = {
-        "flags": 32768,  # IS_COMPONENTS_V2
-        "components": [{"id": 0, "type": 17, "accent_color": 0xFFD700, "components": inner}],
+        "flags": 32768,
+        "components": [{"id": 0, "type": 17, "accent_color": accent, "components": inner}],
     }
     if mention:
-        payload["content"] = mention  # faz o ping real chegar
+        payload["content"] = mention
     return payload
 
 
@@ -2142,10 +2190,73 @@ class BotConfigCog(commands.Cog):
             _log.info(f"[msg_auto] restaurando {len(ativos)} canal(is) ativo(s)")
             for cid in ativos:
                 self._start_canal(cid)
+        self._check_promo_expiry.start()
 
     async def cog_unload(self):
         for cid in list(self._canal_tasks.keys()):
             self._stop_canal(cid)
+        self._check_promo_expiry.cancel()
+
+    @tasks.loop(minutes=1)
+    async def _check_promo_expiry(self):
+        """Verifica a cada minuto se a mega promoção expirou."""
+        try:
+            promo = await asyncio.to_thread(get_promo_ativa)
+            if not promo:
+                return
+            agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+            ate_hora = promo.get("ate_hora", "")
+            if not ate_hora:
+                return
+            h, m = [int(x) for x in ate_hora.split(":")]
+            limite = agora.replace(hour=h, minute=m, second=0, microsecond=0)
+            if agora < limite:
+                return
+
+            # Expirou — reverte preço e limpa promo
+            preco_original_cts = promo.get("preco_original_centavos", 9)
+            cfg = await asyncio.to_thread(carregar_cfg)
+            cfg["preco_por_sala"] = round(preco_original_cts / 100, 4)
+            cfg.pop("mega_promo", None)
+            await asyncio.to_thread(salvar_cfg, cfg)
+            from utils.database import botconfig_save
+            await asyncio.to_thread(botconfig_save, cfg)
+            _log.info(f"[promo] Mega promoção encerrada às {ate_hora}. Preço voltou p/ {preco_original_cts}cts")
+
+            # Posta aviso de encerramento em todos os canais promo ativos
+            ma = await asyncio.to_thread(get_msg_auto)
+            for c in ma.get("canais", []):
+                if c.get("ativo") and c.get("tipo") == "promo":
+                    try:
+                        mention = "@everyone" if c.get("mencionar_everyone", True) else ""
+                        fim_inner = [
+                            {"id": 1, "type": 10, "content": f"## {_em('clockcheck')} Promoção Encerrada!"},
+                            {
+                                "id": 2, "type": 10,
+                                "content": (
+                                    f"A mega promoção das **{ate_hora}** chegou ao fim.\n"
+                                    f"{_em('otherdollar')} Preço voltou ao normal: **R$ {preco_original_cts/100:.2f}/sala**\n\n"
+                                    "-# Fique de olho nas próximas promoções!"
+                                ),
+                            },
+                        ]
+                        if mention:
+                            fim_inner.append({"id": 3, "type": 10, "content": f"-# {mention}"})
+                        payload = {
+                            "flags": 32768,
+                            "components": [{"id": 0, "type": 17, "accent_color": 0x95A5A6, "components": fim_inner}],
+                        }
+                        if mention:
+                            payload["content"] = mention
+                        await _post_promo_v2(int(c["canal_id"]), payload)
+                    except Exception as _ex:
+                        _log.warning(f"[promo:fim] erro em {c['canal_id']}: {_ex}")
+        except Exception as ex:
+            _log.error(f"[promo:expiry] {ex}")
+
+    @_check_promo_expiry.before_loop
+    async def _before_promo(self):
+        await self.bot.wait_until_ready()
 
     # ── Controle por canal ────────────────────────────────────────
     def _start_canal(self, canal_id: int):
