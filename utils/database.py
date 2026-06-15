@@ -2182,3 +2182,54 @@ def pix_creds_get_ativo(guild_id: str) -> tuple:
     if not banco:
         return (None, {})
     return (banco, dict(creds.get(banco) or {}))
+
+
+# ── Planos Infinitos ──────────────────────────────────────────────────────────
+
+def planos_inf_ativar(user_id: str, guild_id: str, role_id: str,
+                      plano_id: str, duracao_segundos: int):
+    """Registra (ou renova) um plano infinito para o usuário."""
+    from datetime import datetime, timezone, timedelta
+    expires = (datetime.now(timezone.utc) + timedelta(seconds=duracao_segundos)).isoformat()
+    db = get_db()
+    db.table("planos_inf_ativos").upsert({
+        "user_id":    str(user_id),
+        "guild_id":   str(guild_id),
+        "role_id":    str(role_id),
+        "plano_id":   str(plano_id),
+        "expires_at": expires,
+    }, on_conflict="user_id,guild_id").execute()
+
+
+def planos_inf_get_usuario(user_id: str, guild_id: str) -> dict | None:
+    """Retorna o plano ativo do usuário nessa guild, ou None."""
+    db = get_db()
+    r = db.table("planos_inf_ativos") \
+          .select("*") \
+          .eq("user_id", str(user_id)) \
+          .eq("guild_id", str(guild_id)) \
+          .execute()
+    rows = r.data if r else []
+    return rows[0] if rows else None
+
+
+def planos_inf_expirados() -> list:
+    """Retorna todos os planos cuja data de expiração já passou."""
+    from datetime import datetime, timezone
+    agora = datetime.now(timezone.utc).isoformat()
+    db = get_db()
+    r = db.table("planos_inf_ativos") \
+          .select("*") \
+          .lt("expires_at", agora) \
+          .execute()
+    return r.data if r else []
+
+
+def planos_inf_remover(user_id: str, guild_id: str):
+    """Remove o plano ativo do usuário nessa guild."""
+    db = get_db()
+    db.table("planos_inf_ativos") \
+      .delete() \
+      .eq("user_id", str(user_id)) \
+      .eq("guild_id", str(guild_id)) \
+      .execute()

@@ -24,7 +24,8 @@ import logging
 import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
+import asyncio
 
 import config
 from utils.emojis import PE, e as _emoji_str
@@ -501,12 +502,289 @@ class _EditDescModal(discord.ui.Modal, title="Editar Descrição"):
 
 
 # ══════════════════════════════════════════════════════════════
-#  Cog principal
+#  Planos Infinitos — /planosinf
 # ══════════════════════════════════════════════════════════════
+
+PLANOS_INF = {
+    "1d": {
+        "nome":      "1 Dia",
+        "preco":     10.00,
+        "emoji_key": "clockcheck",
+        "desc":      "Salas infinitas por 1 dia inteiro.",
+    },
+    "4d": {
+        "nome":      "4 Dias",
+        "preco":     35.99,
+        "emoji_key": "swordbattle",
+        "desc":      "4 dias com salas sem limite.",
+    },
+    "7d": {
+        "nome":      "Semanal",
+        "preco":     70.00,
+        "emoji_key": "presente",
+        "desc":      "1 semana completa de salas infinitas.",
+    },
+}
+
+
+def _build_painel_inf_payload() -> dict:
+    """Painel público de Salas Infinitas com select menu dos 3 planos."""
+    select_opts = []
+    for k, p in PLANOS_INF.items():
+        select_opts.append({
+            "label":       f"{p['nome']} — R$ {p['preco']:.2f}",
+            "value":       k,
+            "description": p["desc"],
+            "emoji":       _emj(p["emoji_key"]),
+        })
+
+    linhas = [f"### {_emoji_str('otherdollar')}  Planos disponíveis"]
+    for p in PLANOS_INF.values():
+        emj = _emoji_str(p["emoji_key"])
+        linhas.append(
+            f"{emj}  **{p['nome']}** → R$ {p['preco']:.2f}  ·  *{p['desc']}*"
+        )
+
+    return {
+        "flags": FLAG_COMPONENTS_V2,
+        "components": [{
+            "id": 1, "type": 17, "accent_color": 0x00CFFF,
+            "components": [
+                {"id": 2, "type": 10, "content": (
+                    f"## {_emoji_str('swordbattle')} SALAS INFINITAS\n"
+                    "Jogue sem limites — sem contar sala!"
+                )},
+                {"id": 3, "type": 14, "divider": True, "spacing": 1},
+                {"id": 4, "type": 10, "content": "\n".join(linhas)},
+                {"id": 5, "type": 1, "components": [{
+                    "type": 3,
+                    "custom_id": "planosInf:select",
+                    "placeholder": "Escolha seu plano…",
+                    "min_values": 1, "max_values": 1,
+                    "options": select_opts,
+                }]},
+            ],
+        }],
+    }
+
+
+def _build_inf_selecionado_payload(plano_id: str) -> dict:
+    """Resposta ephemeral quando o cliente seleciona um plano infinito."""
+    p = PLANOS_INF[plano_id]
+    emj = _emoji_str(p["emoji_key"])
+    return {
+        "flags": FLAG_COMPONENTS_V2 | FLAG_EPHEMERAL,
+        "components": [{
+            "id": 1, "type": 17, "accent_color": 0x00CFFF,
+            "components": [
+                {"id": 2, "type": 10, "content": (
+                    f"## {emj}  {p['nome']} — Salas Infinitas\n"
+                    f"{_emoji_str('otherdollar')}  **Valor:** R$ {p['preco']:.2f}\n"
+                    f"{_emoji_str('channel')}  {p['desc']}\n\n"
+                    f"Clique em **Comprar** abaixo para abrir o atendimento "
+                    f"e finalizar o pagamento."
+                )},
+                {"id": 3, "type": 14, "divider": True, "spacing": 1},
+                {"id": 4, "type": 1, "components": [{
+                    "type": 2, "style": 3,
+                    "label": f"Comprar — R$ {p['preco']:.2f}",
+                    "custom_id": "ticket:abrir",
+                    "emoji": _emj("carteira"),
+                }]},
+            ],
+        }],
+    }
+
+
+
+_DURACAO_PLANO_INF = {
+    "1d": 1 * 24 * 3600,
+    "4d": 4 * 24 * 3600,
+    "7d": 7 * 24 * 3600,
+}
+
+_NOME_CARGO_INF = "Salas Infinitas"
+
 
 class PlanoCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def cog_load(self):
+        self._expiry_loop.start()
+
+    async def cog_unload(self):
+        self._expiry_loop.cancel()
+
+    # ── Helper: pega ou cria o cargo "Salas Infinitas" na guild ──────────────
+    async def _get_or_create_cargo_inf(self, guild: discord.Guild) -> discord.Role | None:
+        """Retorna o cargo Salas Infinitas, criando-o se não existir."""
+        from cogs.botconfig import carregar_cfg, salvar_cfg
+        cfg = carregar_cfg()
+        cargos_inf = cfg.get("cargos_plano_inf") or {}
+        role_id = cargos_inf.get(str(guild.id))
+
+        if role_id:
+            role = guild.get_role(int(role_id))
+            if role:
+                return role
+
+        # Cria o cargo
+        try:
+            role = await guild.create_role(
+                name=_NOME_CARGO_INF,
+                color=discord.Color.from_str("#00CFFF"),
+                reason="Criado automaticamente para Planos Salas Infinitas",
+            )
+            cargos_inf[str(guild.id)] = str(role.id)
+            cfg["cargos_plano_inf"] = cargos_inf
+            import asyncio as _aio
+            await _aio.to_thread(salvar_cfg, cfg)
+            _log.info(f"[planosinf] cargo '{_NOME_CARGO_INF}' criado em {guild.name} (id={role.id})")
+            return role
+        except Exception as ex:
+            _log.error(f"[planosinf] falha ao criar cargo em {guild.name}: {ex}")
+            return None
+
+    # ── Loop de expiração dos planos infinitos ────────────────────────────────
+    @tasks.loop(minutes=2)
+    async def _expiry_loop(self):
+        try:
+            from utils.database import planos_inf_expirados, planos_inf_remover
+            import asyncio as _aio
+            expirados = await _aio.to_thread(planos_inf_expirados)
+            for row in expirados:
+                uid     = int(row["user_id"])
+                gid     = int(row["guild_id"])
+                rid     = int(row["role_id"])
+                guild   = self.bot.get_guild(gid)
+                if guild:
+                    member = guild.get_member(uid)
+                    if member:
+                        role = guild.get_role(rid)
+                        if role and role in member.roles:
+                            try:
+                                await member.remove_roles(role, reason="Plano Salas Infinitas expirado")
+                                _log.info(f"[planosinf] cargo removido de {uid} em {gid}")
+                            except Exception as ex:
+                                _log.warning(f"[planosinf] erro removendo cargo {uid}: {ex}")
+                await _aio.to_thread(planos_inf_remover, str(uid), str(gid))
+        except Exception as ex:
+            _log.error(f"[planosinf:expiry] {ex}")
+
+    @_expiry_loop.before_loop
+    async def _before_expiry(self):
+        await self.bot.wait_until_ready()
+
+    # ── +planosinf @user 1d|4d|7d (admin) ───────────────────────────────────
+    @commands.command(name="planosinf")
+    async def prefix_planosinf(self, ctx, membro: discord.Member = None, plano: str = None):
+        """Concede plano de Salas Infinitas a um membro.
+        +planosinf @user 1d   → 1 dia   (R$ 10)
+        +planosinf @user 4d   → 4 dias  (R$ 35,99)
+        +planosinf @user 7d   → semanal (R$ 70)
+        +planosinf @user off  → remove
+        """
+        from cogs.botconfig import carregar_cfg
+        cfg = carregar_cfg()
+        import config as _cfg
+        admin_ids = getattr(_cfg, "ADMIN_IDS", [])
+        if admin_ids and ctx.author.id not in admin_ids:
+            return
+
+        if not membro or not plano:
+            em = discord.Embed(
+                title="📋  +planosinf — uso",
+                description=(
+                    "`+planosinf @user 1d`  → 1 dia (R$ 10,00)\n"
+                    "`+planosinf @user 4d`  → 4 dias (R$ 35,99)\n"
+                    "`+planosinf @user 7d`  → semanal (R$ 70,00)\n"
+                    "`+planosinf @user off` → remove o plano"
+                ),
+                color=0x00CFFF,
+            )
+            return await ctx.send(embed=em, delete_after=15)
+
+        guild = ctx.guild
+        if not guild:
+            return
+
+        from utils.database import planos_inf_ativar, planos_inf_remover, planos_inf_get_usuario
+        import asyncio as _aio
+
+        # ── off: remove o plano ──────────────────────────────────────────────
+        if plano.lower() == "off":
+            ativo = await _aio.to_thread(planos_inf_get_usuario, str(membro.id), str(guild.id))
+            if ativo:
+                role = guild.get_role(int(ativo["role_id"]))
+                if role and role in membro.roles:
+                    try:
+                        await membro.remove_roles(role, reason="Plano Salas Infinitas removido pelo admin")
+                    except Exception:
+                        pass
+                await _aio.to_thread(planos_inf_remover, str(membro.id), str(guild.id))
+            em = discord.Embed(
+                title=f"✅  Plano removido de {membro.display_name}",
+                color=0x00FF7F,
+            )
+            await ctx.send(embed=em, delete_after=10)
+            try:
+                await ctx.message.delete()
+            except Exception:
+                pass
+            return
+
+        plano = plano.lower()
+        if plano not in _DURACAO_PLANO_INF:
+            return await ctx.send(
+                embed=discord.Embed(description="❌ Plano inválido. Use `1d`, `4d` ou `7d`.", color=0xFF4444),
+                delete_after=10,
+            )
+
+        duracao = _DURACAO_PLANO_INF[plano]
+        info_plano = PLANOS_INF[plano]
+
+        # Pega ou cria cargo
+        role = await self._get_or_create_cargo_inf(guild)
+        if not role:
+            return await ctx.send(
+                embed=discord.Embed(description="❌ Não foi possível criar o cargo. Verifique permissões do bot.", color=0xFF4444),
+                delete_after=10,
+            )
+
+        # Dá o cargo e registra no banco
+        try:
+            await membro.add_roles(role, reason=f"Plano Salas Infinitas {info_plano['nome']}")
+        except Exception as ex:
+            return await ctx.send(
+                embed=discord.Embed(description=f"❌ Erro ao dar cargo: {ex}", color=0xFF4444),
+                delete_after=10,
+            )
+
+        await _aio.to_thread(
+            planos_inf_ativar,
+            str(membro.id), str(guild.id), str(role.id), plano, duracao,
+        )
+
+        from datetime import datetime, timezone, timedelta
+        expira = datetime.now(timezone.utc) + timedelta(seconds=duracao)
+        expira_str = expira.strftime("%d/%m/%Y às %H:%M UTC")
+
+        em = discord.Embed(
+            title=f"♾️  Plano {info_plano['nome']} ativado!",
+            color=0x00CFFF,
+        )
+        em.description = (
+            f"👤 **Membro:** {membro.mention}\n"
+            f"🎭 **Cargo:** {role.mention}\n"
+            f"⏳ **Expira em:** {expira_str}\n"
+            f"💰 **Valor:** R$ {info_plano['preco']:.2f}"
+        )
+        await ctx.send(embed=em)
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
 
     # ── /plano (admin) ──────────────────────────────────────
     @app_commands.command(
@@ -552,6 +830,35 @@ class PlanoCog(commands.Cog):
                     ephemeral=True,
                 )
 
+    # ── /planosinf (admin) ─────────────────────────────────
+    @app_commands.command(
+        name="planosinf",
+        description="[ADMIN] Posta o painel de Salas Infinitas no canal.",
+    )
+    @app_commands.guilds(*[discord.Object(id=gid) for gid in config.OWNER_GUILD_IDS])
+    async def planosinf(self, inter: discord.Interaction):
+        if config.ADMIN_IDS and inter.user.id not in config.ADMIN_IDS:
+            await inter.response.send_message(
+                content=f"{_emoji_str('off')}  Apenas administradores podem usar este comando.",
+                ephemeral=True,
+            )
+            return
+
+        await inter.response.defer(ephemeral=True, thinking=True)
+        payload = _build_painel_inf_payload()
+        ok = await _post_v2_channel(inter.channel_id, payload)
+
+        if ok:
+            await inter.followup.send(
+                content=f"{_emoji_str('on')}  Painel de Salas Infinitas postado!",
+                ephemeral=True,
+            )
+        else:
+            await inter.followup.send(
+                content=f"{_emoji_str('off')}  Falha ao postar. Verifique permissões do bot no canal.",
+                ephemeral=True,
+            )
+
     # ══════════════════════════════════════════════════════════
     #  Listener — interações do /plano
     # ══════════════════════════════════════════════════════════
@@ -577,6 +884,15 @@ class PlanoCog(commands.Cog):
                 return
 
         try:
+            # ── Select Salas Infinitas ─────────────────────────
+            if cid == "planosInf:select":
+                values = (inter.data or {}).get("values", [])
+                if not values or values[0] not in PLANOS_INF:
+                    return
+                payload = _build_inf_selecionado_payload(values[0])
+                await _callback_v2(inter, payload)
+                return
+
             # ── Select de plano ────────────────────────────────
             if cid == "plano:select":
                 values = (inter.data or {}).get("values", [])
