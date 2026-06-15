@@ -3601,51 +3601,63 @@ class MainCog(commands.Cog):
 
     @commands.command(name="aa")
     async def prefix_aa(self, ctx, horario: str = None, centavos: str = None):
-        """Ativa promo automática até HH:MM.
-        +aa HH:MM       → promo normal até o horário
-        +aa HH:MM PRECO → mega promo a X centavos até o horário
-        +aa off         → encerra imediatamente"""
+        """Ativa promo V2 neste canal até HH:MM, a cada 30 min.
+        +aa HH:MM       → promo normal
+        +aa HH:MM PRECO → mega promo a X centavos
+        +aa off         → encerra"""
         if not is_admin(ctx.author.id):
             return
 
         from cogs.botconfig import (
             carregar_cfg, salvar_cfg,
-            get_promo_ativa, get_msg_auto, _build_promo_v2_payload, _post_promo_v2,
-            update_canal_cfg,
+            get_promo_ativa, _build_promo_v2_payload, _post_promo_v2,
         )
+        from utils.database import botconfig_save
         from utils.pix import get_preco_por_sala
+
+        cog_bc = ctx.bot.get_cog("BotConfigCog")
 
         # +aa off → encerra
         if (horario or "").lower() in ("off", "desligar", "fim", "0"):
             promo = await asyncio.to_thread(get_promo_ativa)
             cfg   = await asyncio.to_thread(carregar_cfg)
             preco_original = (promo or {}).get("preco_original_centavos") if promo else None
+            preco_centavos_era = (promo or {}).get("preco_centavos") if promo else None
             cfg.pop("mega_promo", None)
-            if preco_original:
+            if preco_centavos_era is not None and preco_original:
                 cfg["preco_por_sala"] = round(preco_original / 100, 4)
             await asyncio.to_thread(salvar_cfg, cfg)
-            from utils.database import botconfig_save
             await asyncio.to_thread(botconfig_save, cfg)
-            txt = f"{DOLLAR} Preço voltou para **{preco_original} centavos**." if preco_original else ""
-            await ctx.send(embed=_ok("Promoção encerrada!", txt))
+            if cog_bc:
+                cog_bc._stop_aa_loop()
+            try:
+                await ctx.message.delete()
+            except Exception:
+                pass
+            txt = f"{DOLLAR} Preço voltou para **{preco_original} centavos**." if preco_centavos_era and preco_original else ""
+            await ctx.send(embed=_ok("Promoção encerrada!", txt), delete_after=8)
             return
 
         # Valida horário
         if not horario:
+            try:
+                await ctx.message.delete()
+            except Exception:
+                pass
             return await ctx.send(embed=_err(
                 "Uso correto",
                 f"`+aa HH:MM` — promo normal até o horário\n"
                 f"`+aa HH:MM CENTAVOS` — mega promo a X centavos\n"
                 f"`+aa off` — encerra",
-            ))
+            ), delete_after=15)
         try:
             h, m = [int(x) for x in horario.split(":")]
             if not (0 <= h <= 23 and 0 <= m <= 59):
                 raise ValueError
         except Exception:
-            return await ctx.send(embed=_err("Horário inválido.", "Use `HH:MM`, ex: `23:30`"))
+            return await ctx.send(embed=_err("Horário inválido.", "Use `HH:MM`, ex: `23:30`"), delete_after=10)
 
-        # Valida centavos (opcional — sem centavos = promo normal, sem mexer no preço)
+        # Valida centavos (opcional)
         cts = None
         if centavos is not None:
             try:
@@ -3653,84 +3665,57 @@ class MainCog(commands.Cog):
                 if cts <= 0 or cts > 9999:
                     raise ValueError
             except Exception:
-                return await ctx.send(embed=_err("Centavos inválido.", "Ex: `3` = R$ 0,03/sala"))
+                return await ctx.send(embed=_err("Centavos inválido.", "Ex: `3` = R$ 0,03/sala"), delete_after=10)
 
         cfg = await asyncio.to_thread(carregar_cfg)
+        preco_atual_cts = round(get_preco_por_sala() * 100)
 
         if cts is not None:
-            # Mega promo: muda preço
-            preco_atual_cts = round(get_preco_por_sala() * 100)
             cfg["preco_por_sala"] = round(cts / 100, 4)
             cfg["mega_promo"] = {
                 "ate_hora": f"{h:02d}:{m:02d}",
                 "preco_centavos": cts,
                 "preco_original_centavos": preco_atual_cts,
+                "canal_id": ctx.channel.id,
             }
-            desc_ativacao = (
-                f"{DOLLAR} Preço: **{cts} centavos** (R$ {cts/100:.2f}/sala)\n"
-                f"{CLOCK} Encerra às: **{h:02d}:{m:02d} BRT** — preço volta ao normal\n"
-            )
         else:
-            # Promo normal: só agenda o fim, não mexe no preço
-            preco_atual_cts = round(get_preco_por_sala() * 100)
             cfg["mega_promo"] = {
                 "ate_hora": f"{h:02d}:{m:02d}",
-                "preco_centavos": None,         # None = não é mega promo, preço não muda
+                "preco_centavos": None,
                 "preco_original_centavos": preco_atual_cts,
+                "canal_id": ctx.channel.id,
             }
-            desc_ativacao = (
-                f"{DOLLAR} Preço normal: **{preco_atual_cts} centavos**\n"
-                f"{CLOCK} Promos param às: **{h:02d}:{m:02d} BRT**\n"
-            )
 
         await asyncio.to_thread(salvar_cfg, cfg)
-        from utils.database import botconfig_save
         await asyncio.to_thread(botconfig_save, cfg)
 
-        # Dispara promo imediatamente em todos os canais ativos tipo "promo"
-        # e reinicia os loops para o próximo ciclo começar do zero agora
-        canais_enviados = 0
+        # Envia promo V2 agora neste canal
         try:
-            ma     = await asyncio.to_thread(get_msg_auto)
-            cog_bc = ctx.bot.get_cog("BotConfigCog")
-            for c in ma.get("canais", []):
-                if not (c.get("ativo") and c.get("tipo") == "promo"):
-                    continue
-                cid = int(c["canal_id"])
-                try:
-                    payload = await asyncio.to_thread(
-                        _build_promo_v2_payload,
-                        c.get("mensagem", ""),
-                        c.get("mencionar_everyone", True),
-                    )
-                    nova_id = await _post_promo_v2(cid, payload)
-                    if nova_id:
-                        await asyncio.to_thread(update_canal_cfg, cid, ultima_msg_id=nova_id)
-                        canais_enviados += 1
-                    if cog_bc:
-                        cog_bc._restart_canal(cid, skip_first_send=True)
-                except Exception as _ex:
-                    _log.warning(f"[+aa] erro enviando promo em {cid}: {_ex}")
+            payload = await asyncio.to_thread(_build_promo_v2_payload, "", True)
+            await _post_promo_v2(ctx.channel.id, payload)
         except Exception as _ex:
-            _log.warning(f"[+aa] erro disparando promos: {_ex}")
+            _log.warning(f"[+aa] erro enviando promo inicial: {_ex}")
 
-        # Deleta o comando do canal (não deixa rastro no canal de promo)
+        # Inicia loop de 30 em 30 min
+        if cog_bc:
+            cog_bc._start_aa_loop(ctx.channel.id)
+
+        # Remove o comando do canal e manda confirmação sumindo rápido
         try:
             await ctx.message.delete()
         except Exception:
             pass
 
-        titulo = f"{PRESENTE}  Mega Promoção ATIVADA!" if cts is not None else f"{PRESENTE}  Promoção ATIVADA!"
-        em = _emb(titulo, config.COR_SUCESSO)
-        if canais_enviados:
-            canais_txt = f"{REFRESH} Promo enviada em **{canais_enviados} canal(is)** agora e a cada 30 min.\n-# Use `+aa off` para encerrar antes."
+        if cts is not None:
+            titulo = f"{PRESENTE}  Mega Promoção ATIVADA!"
+            desc = f"{DOLLAR} Preço: **{cts} centavos** (R$ {cts/100:.2f}/sala)\n{CLOCK} Encerra às: **{h:02d}:{m:02d} BRT**"
         else:
-            canais_txt = (
-                f"⚠️ **Nenhum canal recebeu a promo!**\n"
-                f"-# Configure um canal como **Promo V2** em `/botconfig → Msg Automática` e ative-o."
-            )
-        em.description = desc_ativacao + canais_txt
-        await ctx.send(embed=em, delete_after=15)
+            titulo = f"{PRESENTE}  Promoção ATIVADA!"
+            desc = f"{CLOCK} Promos neste canal até **{h:02d}:{m:02d} BRT** — a cada 30 min."
+
+        em = _emb(titulo, config.COR_SUCESSO)
+        em.description = desc + f"\n-# Use `+aa off` para encerrar antes."
+        await ctx.send(embed=em, delete_after=10)
 
     @commands.command(name="painel")
     async def prefix_painel(self, ctx):

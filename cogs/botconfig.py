@@ -2106,8 +2106,8 @@ def _build_promo_v2_payload(mensagem: str, mencionar: bool = True) -> dict:
             {
                 "id": 2, "type": 10,
                 "content": (
-                    f"{mensagem}\n\n"
-                    f"{_em('awaiting')} **Promoção válida somente até às {ate_hora} BRT!**\n"
+                    (f"{mensagem}\n\n" if mensagem and mensagem.strip() else "")
+                    + f"{_em('awaiting')} **Promoção válida somente até às {ate_hora} BRT!**\n"
                     "-# Após encerrar, o preço volta ao normal. Não perca!"
                 ),
             },
@@ -2181,7 +2181,8 @@ class BotConfigCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._canal_tasks: dict[int, asyncio.Task] = {}  # canal_id → task
-        self._skip_send_once: set[int] = set()           # canais que devem pular o 1º envio (acabaram de receber do +aa)
+        self._skip_send_once: set[int] = set()           # canais que devem pular o 1º envio
+        self._aa_task: asyncio.Task | None = None        # loop exclusivo do +aa
 
     async def cog_load(self):
         """Inicia loops dos canais que estavam ativos antes do restart."""
@@ -2191,11 +2192,17 @@ class BotConfigCog(commands.Cog):
             _log.info(f"[msg_auto] restaurando {len(ativos)} canal(is) ativo(s)")
             for cid in ativos:
                 self._start_canal(cid)
+        # Restaura loop do +aa se promo estava ativa com canal_id
+        promo = get_promo_ativa()
+        if promo and promo.get("canal_id"):
+            _log.info(f"[+aa] restaurando loop no canal {promo['canal_id']}")
+            self._start_aa_loop(int(promo["canal_id"]))
         self._check_promo_expiry.start()
 
     async def cog_unload(self):
         for cid in list(self._canal_tasks.keys()):
             self._stop_canal(cid)
+        self._stop_aa_loop()
         self._check_promo_expiry.cancel()
 
     @tasks.loop(minutes=1)
@@ -2217,6 +2224,7 @@ class BotConfigCog(commands.Cog):
             # Expirou — reverte preço apenas se era mega promo (preco_centavos != None)
             preco_centavos_promo = promo.get("preco_centavos")
             preco_original_cts   = promo.get("preco_original_centavos", 9)
+            aa_canal_id          = promo.get("canal_id")
             cfg = await asyncio.to_thread(carregar_cfg)
             if preco_centavos_promo is not None:
                 cfg["preco_por_sala"] = round(preco_original_cts / 100, 4)
@@ -2224,38 +2232,45 @@ class BotConfigCog(commands.Cog):
             await asyncio.to_thread(salvar_cfg, cfg)
             from utils.database import botconfig_save
             await asyncio.to_thread(botconfig_save, cfg)
+            self._stop_aa_loop()
             _log.info(f"[promo] Promoção encerrada às {ate_hora}. preco_centavos={preco_centavos_promo}")
 
-            # Posta aviso de encerramento em todos os canais promo ativos
+            # Monta payload de encerramento
+            if preco_centavos_promo is not None:
+                corpo_fim = (
+                    f"A mega promoção das **{ate_hora}** chegou ao fim.\n"
+                    f"{_em('otherdollar')} Preço voltou ao normal: **R$ {preco_original_cts/100:.2f}/sala**\n\n"
+                    "-# Fique de olho nas próximas promoções!"
+                )
+            else:
+                corpo_fim = (
+                    f"A promoção das **{ate_hora}** chegou ao fim.\n\n"
+                    "-# Fique de olho nas próximas promoções!"
+                )
+            fim_inner = [
+                {"id": 1, "type": 10, "content": f"## {_em('clockcheck')} Promoção Encerrada!"},
+                {"id": 2, "type": 10, "content": corpo_fim},
+                {"id": 3, "type": 10, "content": "-# @everyone"},
+            ]
+            payload_fim = {
+                "flags": 32768,
+                "content": "@everyone",
+                "components": [{"id": 0, "type": 17, "accent_color": 0x95A5A6, "components": fim_inner}],
+            }
+
+            # Posta no canal do +aa (se existir)
+            if aa_canal_id:
+                try:
+                    await _post_promo_v2(int(aa_canal_id), payload_fim)
+                except Exception as _ex:
+                    _log.warning(f"[promo:fim] erro canal +aa {aa_canal_id}: {_ex}")
+
+            # Posta em canais msg_auto tipo promo (se existirem)
             ma = await asyncio.to_thread(get_msg_auto)
             for c in ma.get("canais", []):
                 if c.get("ativo") and c.get("tipo") == "promo":
                     try:
-                        mention = "@everyone" if c.get("mencionar_everyone", True) else ""
-                        if preco_centavos_promo is not None:
-                            corpo = (
-                                f"A mega promoção das **{ate_hora}** chegou ao fim.\n"
-                                f"{_em('otherdollar')} Preço voltou ao normal: **R$ {preco_original_cts/100:.2f}/sala**\n\n"
-                                "-# Fique de olho nas próximas promoções!"
-                            )
-                        else:
-                            corpo = (
-                                f"A promoção programada das **{ate_hora}** chegou ao fim.\n\n"
-                                "-# Fique de olho nas próximas promoções!"
-                            )
-                        fim_inner = [
-                            {"id": 1, "type": 10, "content": f"## {_em('clockcheck')} Promoção Encerrada!"},
-                            {"id": 2, "type": 10, "content": corpo},
-                        ]
-                        if mention:
-                            fim_inner.append({"id": 3, "type": 10, "content": f"-# {mention}"})
-                        payload = {
-                            "flags": 32768,
-                            "components": [{"id": 0, "type": 17, "accent_color": 0x95A5A6, "components": fim_inner}],
-                        }
-                        if mention:
-                            payload["content"] = mention
-                        await _post_promo_v2(int(c["canal_id"]), payload)
+                        await _post_promo_v2(int(c["canal_id"]), payload_fim)
                     except Exception as _ex:
                         _log.warning(f"[promo:fim] erro em {c['canal_id']}: {_ex}")
         except Exception as ex:
@@ -2278,6 +2293,62 @@ class BotConfigCog(commands.Cog):
         if task and not task.done():
             task.cancel()
         self._canal_tasks.pop(canal_id, None)
+
+    # ── Loop exclusivo do +aa (independente do msg_auto) ─────────────
+    def _start_aa_loop(self, canal_id: int):
+        self._stop_aa_loop()
+        self._aa_task = self.bot.loop.create_task(self._aa_promo_loop(canal_id))
+
+    def _stop_aa_loop(self):
+        if self._aa_task and not self._aa_task.done():
+            self._aa_task.cancel()
+        self._aa_task = None
+
+    async def _aa_promo_loop(self, canal_id: int):
+        """Envia promo V2 a cada 30 min no canal do +aa até a hora configurada."""
+        await self.bot.wait_until_ready()
+        ultima_msg_id = None
+        try:
+            while True:
+                await asyncio.sleep(30 * 60)
+
+                promo = await asyncio.to_thread(get_promo_ativa)
+                if not promo or int(promo.get("canal_id", 0)) != canal_id:
+                    return
+
+                # Verifica expiração antes de enviar
+                agora = datetime.now(_BR)
+                ate_hora = promo.get("ate_hora", "")
+                if ate_hora:
+                    hh, mm = [int(x) for x in ate_hora.split(":")]
+                    limite = agora.replace(hour=hh, minute=mm, second=0, microsecond=0)
+                    if agora >= limite:
+                        return
+
+                canal = self.bot.get_channel(canal_id)
+                if not canal:
+                    _log.warning(f"[aa_loop] canal {canal_id} não encontrado")
+                    return
+
+                # Deleta mensagem anterior
+                if ultima_msg_id:
+                    try:
+                        msg = await canal.fetch_message(int(ultima_msg_id))
+                        await msg.delete()
+                    except Exception:
+                        pass
+
+                payload = await asyncio.to_thread(_build_promo_v2_payload, "", True)
+                nova_id = await _post_promo_v2(canal_id, payload)
+                if nova_id:
+                    ultima_msg_id = nova_id
+                    _log.info(f"[aa_loop] promo enviada em #{canal.name}")
+
+        except asyncio.CancelledError:
+            _log.info(f"[aa_loop:{canal_id}] cancelado")
+            raise
+        except Exception as ex:
+            _log.error(f"[aa_loop:{canal_id}] erro: {ex}", exc_info=True)
 
     def _restart_canal(self, canal_id: int, skip_first_send: bool = False):
         self._stop_canal(canal_id)
