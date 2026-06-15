@@ -2214,15 +2214,17 @@ class BotConfigCog(commands.Cog):
             if agora < limite:
                 return
 
-            # Expirou — reverte preço e limpa promo
-            preco_original_cts = promo.get("preco_original_centavos", 9)
+            # Expirou — reverte preço apenas se era mega promo (preco_centavos != None)
+            preco_centavos_promo = promo.get("preco_centavos")
+            preco_original_cts   = promo.get("preco_original_centavos", 9)
             cfg = await asyncio.to_thread(carregar_cfg)
-            cfg["preco_por_sala"] = round(preco_original_cts / 100, 4)
+            if preco_centavos_promo is not None:
+                cfg["preco_por_sala"] = round(preco_original_cts / 100, 4)
             cfg.pop("mega_promo", None)
             await asyncio.to_thread(salvar_cfg, cfg)
             from utils.database import botconfig_save
             await asyncio.to_thread(botconfig_save, cfg)
-            _log.info(f"[promo] Mega promoção encerrada às {ate_hora}. Preço voltou p/ {preco_original_cts}cts")
+            _log.info(f"[promo] Promoção encerrada às {ate_hora}. preco_centavos={preco_centavos_promo}")
 
             # Posta aviso de encerramento em todos os canais promo ativos
             ma = await asyncio.to_thread(get_msg_auto)
@@ -2230,16 +2232,20 @@ class BotConfigCog(commands.Cog):
                 if c.get("ativo") and c.get("tipo") == "promo":
                     try:
                         mention = "@everyone" if c.get("mencionar_everyone", True) else ""
+                        if preco_centavos_promo is not None:
+                            corpo = (
+                                f"A mega promoção das **{ate_hora}** chegou ao fim.\n"
+                                f"{_em('otherdollar')} Preço voltou ao normal: **R$ {preco_original_cts/100:.2f}/sala**\n\n"
+                                "-# Fique de olho nas próximas promoções!"
+                            )
+                        else:
+                            corpo = (
+                                f"A promoção programada das **{ate_hora}** chegou ao fim.\n\n"
+                                "-# Fique de olho nas próximas promoções!"
+                            )
                         fim_inner = [
                             {"id": 1, "type": 10, "content": f"## {_em('clockcheck')} Promoção Encerrada!"},
-                            {
-                                "id": 2, "type": 10,
-                                "content": (
-                                    f"A mega promoção das **{ate_hora}** chegou ao fim.\n"
-                                    f"{_em('otherdollar')} Preço voltou ao normal: **R$ {preco_original_cts/100:.2f}/sala**\n\n"
-                                    "-# Fique de olho nas próximas promoções!"
-                                ),
-                            },
+                            {"id": 2, "type": 10, "content": corpo},
                         ]
                         if mention:
                             fim_inner.append({"id": 3, "type": 10, "content": f"-# {mention}"})
