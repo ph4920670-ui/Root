@@ -628,7 +628,6 @@ class RankingPublicoView(discord.ui.View):
         custom_id="ranking:atualizar",
     )
     async def btn_ranking(self, inter: discord.Interaction, btn: discord.ui.Button):
-        # ACK imediato (sem trabalho de DB antes) para não estourar os 3s.
         try:
             await inter.response.defer(ephemeral=True, thinking=True)
         except Exception:
@@ -638,9 +637,14 @@ class RankingPublicoView(discord.ui.View):
             top10   = await asyncio.to_thread(top_criadores_hoje, 10)
             premios = await asyncio.to_thread(ranking_premios_get)
             payload = _build_ranking_tabela_v2_payload(top10, premios)
-            ok = await _followup_v2(inter.client.application_id, inter.token, payload)
+            ok = await _followup_v2(inter.application_id, inter.token, payload)
             if not ok:
-                await inter.followup.send(embed=_err("Erro ao carregar ranking."), ephemeral=True)
+                # Fallback: embed normal com os dados do ranking
+                try:
+                    em = _build_ranking_embed(top10, premios)
+                    await inter.followup.send(embed=em, ephemeral=True)
+                except Exception:
+                    await inter.followup.send(embed=_err("Erro ao carregar ranking."), ephemeral=True)
         except Exception as ex:
             _log.warning(f"[ranking:atualizar] {ex}")
             try:
@@ -657,7 +661,6 @@ class RankingPublicoView(discord.ui.View):
         custom_id="ranking:perfil",
     )
     async def btn_perfil(self, inter: discord.Interaction, btn: discord.ui.Button):
-        # ACK imediato (sem trabalho de DB antes) para não estourar os 3s.
         try:
             await inter.response.defer(ephemeral=True, thinking=True)
         except Exception:
@@ -678,9 +681,24 @@ class RankingPublicoView(discord.ui.View):
                     break
 
             payload = _build_perfil_v2_payload(inter.user, posicao, salas_hoje, saldo, len(todos))
-            ok = await _followup_v2(inter.client.application_id, inter.token, payload)
+            ok = await _followup_v2(inter.application_id, inter.token, payload)
             if not ok:
-                await inter.followup.send(embed=_err("Erro ao carregar perfil."), ephemeral=True)
+                # Fallback: embed normal com dados do perfil
+                try:
+                    em = discord.Embed(title=f"{TOP}  Perfil de {inter.user.display_name}", color=0xFFD700)
+                    if posicao:
+                        badge = _pos_emoji(posicao - 1) if posicao <= 3 else _em_str("dot")
+                        s = "s" if salas_hoje != 1 else ""
+                        em.description = (
+                            f"{badge} **{posicao}º lugar** de {len(todos)} participantes\n"
+                            f"Você criou **{salas_hoje} sala{s}** hoje\n\n"
+                            f"Saldo: **{saldo} sala(s)**"
+                        )
+                    else:
+                        em.description = f"Você ainda não criou salas hoje.\n\nSaldo: **{saldo} sala(s)**"
+                    await inter.followup.send(embed=em, ephemeral=True)
+                except Exception:
+                    await inter.followup.send(embed=_err("Erro ao carregar perfil."), ephemeral=True)
         except Exception as ex:
             _log.warning(f"[ranking:perfil] {ex}")
             try:
