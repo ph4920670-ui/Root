@@ -3730,9 +3730,9 @@ class MainCog(commands.Cog):
             ]
             _accent = 0xFFD700
         _payload_aa = {
-            "content": "@everyone",
             "flags": 32768,
             "components": [{"id": 0, "type": 17, "accent_color": _accent, "components": _inner}],
+            "allowed_mentions": {"parse": ["everyone"]},
         }
         try:
             await _post_promo_v2(ctx.channel.id, _payload_aa)

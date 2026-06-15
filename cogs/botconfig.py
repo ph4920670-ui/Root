@@ -2151,7 +2151,7 @@ def _build_promo_v2_payload(mensagem: str, mencionar: bool = True) -> dict:
         "components": [{"id": 0, "type": 17, "accent_color": accent, "components": inner}],
     }
     if mention:
-        payload["content"] = mention
+        payload["allowed_mentions"] = {"parse": ["everyone"]}
     return payload
 
 
@@ -2254,8 +2254,8 @@ class BotConfigCog(commands.Cog):
             ]
             payload_fim = {
                 "flags": 32768,
-                "content": "@everyone",
                 "components": [{"id": 0, "type": 17, "accent_color": 0x95A5A6, "components": fim_inner}],
+                "allowed_mentions": {"parse": ["everyone"]},
             }
 
             # Posta no canal do +aa (se existir)
@@ -2378,9 +2378,9 @@ class BotConfigCog(commands.Cog):
                     ]
                     _accent = 0xFFD700
                 payload = {
-                    "content": "@everyone",
                     "flags": 32768,
                     "components": [{"id": 0, "type": 17, "accent_color": _accent, "components": _inner}],
+                    "allowed_mentions": {"parse": ["everyone"]},
                 }
                 nova_id = await _post_promo_v2(canal_id, payload)
                 if nova_id:
