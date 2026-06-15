@@ -3689,6 +3689,7 @@ class MainCog(commands.Cog):
 
         # Dispara promo imediatamente em todos os canais ativos tipo "promo"
         # e reinicia os loops para o próximo ciclo começar do zero agora
+        canais_enviados = 0
         try:
             ma     = await asyncio.to_thread(get_msg_auto)
             cog_bc = ctx.bot.get_cog("BotConfigCog")
@@ -3705,6 +3706,7 @@ class MainCog(commands.Cog):
                     nova_id = await _post_promo_v2(cid, payload)
                     if nova_id:
                         await asyncio.to_thread(update_canal_cfg, cid, ultima_msg_id=nova_id)
+                        canais_enviados += 1
                     if cog_bc:
                         cog_bc._restart_canal(cid, skip_first_send=True)
                 except Exception as _ex:
@@ -3712,10 +3714,23 @@ class MainCog(commands.Cog):
         except Exception as _ex:
             _log.warning(f"[+aa] erro disparando promos: {_ex}")
 
+        # Deleta o comando do canal (não deixa rastro no canal de promo)
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
+
         titulo = f"{PRESENTE}  Mega Promoção ATIVADA!" if cts is not None else f"{PRESENTE}  Promoção ATIVADA!"
         em = _emb(titulo, config.COR_SUCESSO)
-        em.description = desc_ativacao + f"{REFRESH} Promo enviada agora e a cada 30 min.\n-# Use `+aa off` para encerrar antes."
-        await ctx.send(embed=em)
+        if canais_enviados:
+            canais_txt = f"{REFRESH} Promo enviada em **{canais_enviados} canal(is)** agora e a cada 30 min.\n-# Use `+aa off` para encerrar antes."
+        else:
+            canais_txt = (
+                f"⚠️ **Nenhum canal recebeu a promo!**\n"
+                f"-# Configure um canal como **Promo V2** em `/botconfig → Msg Automática` e ative-o."
+            )
+        em.description = desc_ativacao + canais_txt
+        await ctx.send(embed=em, delete_after=15)
 
     @commands.command(name="painel")
     async def prefix_painel(self, ctx):
