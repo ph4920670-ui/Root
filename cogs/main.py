@@ -3694,8 +3694,6 @@ class MainCog(commands.Cog):
 
         # Envia promo V2 agora neste canal (payload inline — evita bug de content vazio)
         ate_hora_str = f"{h:02d}:{m:02d}"
-        canal_id_compras = cfg.get("canal_compras_pub_id")
-        canal_txt = f"<#{canal_id_compras}>" if canal_id_compras else "**#compras**"
         if cts is not None:
             _inner = [
                 {"id": 1, "type": 10, "content": f"## {_bc_em('rage')} MEGA PROMOÇÃO — SALAS A {cts} CENTAVOS!"},
@@ -3706,8 +3704,7 @@ class MainCog(commands.Cog):
                 {"id": 3, "type": 14, "divider": True, "spacing": 1},
                 {"id": 4, "type": 10, "content": (
                     f"{_bc_em('otherdollar')} **PREÇO ESPECIAL:** R$ {cts/100:.2f}/sala\n"
-                    f"{_bc_em('clockcheck')} **Encerra às:** {ate_hora_str} BRT\n"
-                    f"{_bc_em('channel')} **Compre aqui:** {canal_txt}"
+                    f"{_bc_em('clockcheck')} **Encerra às:** {ate_hora_str} BRT"
                 )},
                 {"id": 5, "type": 10, "content": "-# @everyone"},
             ]
@@ -3723,8 +3720,7 @@ class MainCog(commands.Cog):
                 {"id": 3, "type": 14, "divider": True, "spacing": 1},
                 {"id": 4, "type": 10, "content": (
                     f"{_bc_em('otherdollar')} **Preço:** R$ {_preco_r:.2f}/sala\n"
-                    f"{_bc_em('clockcheck')} **Encerra às:** {ate_hora_str} BRT\n"
-                    f"{_bc_em('channel')} **Compre aqui:** {canal_txt}"
+                    f"{_bc_em('clockcheck')} **Encerra às:** {ate_hora_str} BRT"
                 )},
                 {"id": 5, "type": 10, "content": "-# @everyone"},
             ]

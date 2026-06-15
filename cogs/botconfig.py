@@ -2342,8 +2342,6 @@ class BotConfigCog(commands.Cog):
                 _promo_cts  = promo.get("preco_centavos")
                 _ate_str    = promo.get("ate_hora", "?")
                 _cfg_loop   = await asyncio.to_thread(carregar_cfg)
-                _cid_comp   = _cfg_loop.get("canal_compras_pub_id")
-                _canal_txt  = f"<#{_cid_comp}>" if _cid_comp else "**#compras**"
                 if _promo_cts is not None:
                     _inner = [
                         {"id": 1, "type": 10, "content": f"## {_em('rage')} MEGA PROMOÇÃO — SALAS A {_promo_cts} CENTAVOS!"},
@@ -2354,8 +2352,7 @@ class BotConfigCog(commands.Cog):
                         {"id": 3, "type": 14, "divider": True, "spacing": 1},
                         {"id": 4, "type": 10, "content": (
                             f"{_em('otherdollar')} **PREÇO ESPECIAL:** R$ {_promo_cts/100:.2f}/sala\n"
-                            f"{_em('clockcheck')} **Encerra às:** {_ate_str} BRT\n"
-                            f"{_em('channel')} **Compre aqui:** {_canal_txt}"
+                            f"{_em('clockcheck')} **Encerra às:** {_ate_str} BRT"
                         )},
                         {"id": 5, "type": 10, "content": "-# @everyone"},
                     ]
@@ -2371,8 +2368,7 @@ class BotConfigCog(commands.Cog):
                         {"id": 3, "type": 14, "divider": True, "spacing": 1},
                         {"id": 4, "type": 10, "content": (
                             f"{_em('otherdollar')} **Preço:** R$ {_preco_r:.2f}/sala\n"
-                            f"{_em('clockcheck')} **Encerra às:** {_ate_str} BRT\n"
-                            f"{_em('channel')} **Compre aqui:** {_canal_txt}"
+                            f"{_em('clockcheck')} **Encerra às:** {_ate_str} BRT"
                         )},
                         {"id": 5, "type": 10, "content": "-# @everyone"},
                     ]
