@@ -7,6 +7,7 @@ from discord.ext import commands, tasks
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import asyncio
+import aiohttp
 
 import config
 _ADMIN_GUILDS = [discord.Object(id=gid) for gid in config.OWNER_GUILD_IDS]
@@ -1564,6 +1565,9 @@ def _canal_painel_emb(c: dict, client) -> discord.Embed:
     nome = canal.mention if canal else f"`{c['canal_id']}`"
     guild_nome = canal.guild.name if canal and hasattr(canal, "guild") and canal.guild else "?"
     status = f"{ON} **LIGADO**" if c.get("ativo") else f"{OFF} **DESLIGADO**"
+    tipo = c.get("tipo", "texto")
+    tipo_txt = "🎯 **Promo V2** (visual estilizado)" if tipo == "promo" else "📝 **Texto simples**"
+    mencionar = "✅ Sim" if c.get("mencionar_everyone", True) else "❌ Não"
     preview = (c.get("mensagem") or "")
     preview = (preview[:200] + "...") if len(preview) > 200 else preview
 
@@ -1571,8 +1575,10 @@ def _canal_painel_emb(c: dict, client) -> discord.Embed:
     em.description = (
         f"> **Canal:** {nome} *(em {guild_nome})*\n"
         f"> **Status:** {status}\n"
-        f"> **Intervalo:** **{c.get('intervalo_min', 30)} min**\n\n"
-        f"**Mensagem:**\n```{preview or '(vazia)'}```"
+        f"> **Intervalo:** **{c.get('intervalo_min', 30)} min**\n"
+        f"> **Tipo:** {tipo_txt}\n"
+        f"> **@everyone:** {mencionar}\n\n"
+        f"**Mensagem/Texto do corpo:**\n```{preview or '(vazia)'}```"
     )
     return em
 
@@ -1637,7 +1643,29 @@ class CanalPainelView(discord.ui.View):
         em = _canal_painel_emb(c, i.client)
         await i.response.edit_message(embed=em, view=self)
 
-    @discord.ui.button(label="Remover Canal", emoji="🗑️", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="Promo V2 / Texto", emoji="🎯", style=discord.ButtonStyle.primary, row=2)
+    async def toggle_tipo(self, i, b):
+        c = get_canal_cfg(self.canal_id)
+        if not c:
+            return await i.response.send_message(embed=_emb("❌ Canal removido.", config.COR_ERRO), ephemeral=True)
+        novo_tipo = "texto" if c.get("tipo") == "promo" else "promo"
+        update_canal_cfg(self.canal_id, tipo=novo_tipo)
+        c = get_canal_cfg(self.canal_id)
+        em = _canal_painel_emb(c, i.client)
+        await i.response.edit_message(embed=em, view=self)
+
+    @discord.ui.button(label="@everyone On/Off", emoji="📢", style=discord.ButtonStyle.secondary, row=2)
+    async def toggle_everyone(self, i, b):
+        c = get_canal_cfg(self.canal_id)
+        if not c:
+            return await i.response.send_message(embed=_emb("❌ Canal removido.", config.COR_ERRO), ephemeral=True)
+        novo = not c.get("mencionar_everyone", True)
+        update_canal_cfg(self.canal_id, mencionar_everyone=novo)
+        c = get_canal_cfg(self.canal_id)
+        em = _canal_painel_emb(c, i.client)
+        await i.response.edit_message(embed=em, view=self)
+
+    @discord.ui.button(label="Remover Canal", emoji="🗑️", style=discord.ButtonStyle.danger, row=3)
     async def rem(self, i, b):
         cog = i.client.get_cog("BotConfigCog")
         if cog:
@@ -1645,7 +1673,7 @@ class CanalPainelView(discord.ui.View):
         remove_msg_auto_canal(self.canal_id)
         em = discord.Embed(title=f"{ON}  Canal removido!", color=config.COR_SUCESSO)
         em.description = "> Não receberá mais mensagens automáticas."
-        await i.response.edit_message(embed=em, view=None)
+        await i.response.edit_message(em, view=None)
 
 
 class MsgAutoView(discord.ui.View):
@@ -2029,6 +2057,77 @@ async def dar_cargo_comprador(bot, guild_id, user_id, quantia):
 
 _log = logging.getLogger("salasff.msgauto")
 
+# ── Promo V2 ──────────────────────────────────────────────────────────────────
+
+def _em(key: str) -> str:
+    from utils.emojis import e as _em_str
+    try:
+        return _em_str(key)
+    except Exception:
+        return ""
+
+
+def _build_promo_v2_payload(mensagem: str, mencionar: bool = True) -> dict:
+    """Monta payload Components V2 da mensagem promo."""
+    from utils.pix import get_preco_por_sala
+    preco = get_preco_por_sala()
+    cfg   = carregar_cfg()
+    canal_id_compras = cfg.get("canal_compras_pub_id")
+    canal_txt = f"<#{canal_id_compras}>" if canal_id_compras else "**#compras**"
+
+    mention = "@everyone" if mencionar else ""
+
+    inner = [
+        {
+            "id": 1, "type": 10,
+            "content": f"## {_em('swordbattle')} COMPRE SALAS AGORA",
+        },
+        {
+            "id": 2, "type": 10,
+            "content": mensagem,
+        },
+        {"id": 3, "type": 14, "divider": True, "spacing": 1},
+        {
+            "id": 4, "type": 10,
+            "content": (
+                f"{_em('otherdollar')} **Preço:** R$ {preco:.2f}/sala\n"
+                f"{_em('channel')} **Compre aqui:** {canal_txt}"
+            ),
+        },
+    ]
+    if mention:
+        inner.append({"id": 5, "type": 10, "content": f"-# {mention}"})
+
+    payload = {
+        "flags": 32768,  # IS_COMPONENTS_V2
+        "components": [{"id": 0, "type": 17, "accent_color": 0xFFD700, "components": inner}],
+    }
+    if mention:
+        payload["content"] = mention  # faz o ping real chegar
+    return payload
+
+
+async def _post_promo_v2(canal_id: int, payload: dict) -> discord.Message | None:
+    """Envia payload V2 via REST (necessário para flag IS_COMPONENTS_V2)."""
+    import json as _json
+    import config as _cfg
+    url = f"https://discord.com/api/v10/channels/{canal_id}/messages"
+    headers = {
+        "Authorization": f"Bot {_cfg.DISCORD_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(url, json=payload, headers=headers,
+                              timeout=aiohttp.ClientTimeout(total=15)) as r:
+                if r.status in (200, 201):
+                    data = await r.json()
+                    return data.get("id")
+                _log.warning(f"[promo v2] {r.status} {(await r.text())[:200]}")
+    except Exception as ex:
+        _log.error(f"[promo v2] {ex}")
+    return None
+
 
 class BotConfigCog(commands.Cog):
     def __init__(self, bot):
@@ -2098,9 +2197,21 @@ class BotConfigCog(commands.Cog):
 
                 # 2) Envia mensagem nova
                 try:
-                    nova = await canal.send(c["mensagem"])
-                    update_canal_cfg(canal_id, ultima_msg_id=nova.id)
-                    _log.info(f"[msg_auto:{canal_id}] enviado em #{canal.name}")
+                    if c.get("tipo") == "promo":
+                        mencionar = c.get("mencionar_everyone", True)
+                        payload   = await asyncio.to_thread(
+                            _build_promo_v2_payload, c.get("mensagem", ""), mencionar
+                        )
+                        nova_id = await _post_promo_v2(canal_id, payload)
+                        if nova_id:
+                            update_canal_cfg(canal_id, ultima_msg_id=nova_id)
+                            _log.info(f"[msg_auto:{canal_id}] promo V2 enviada em #{canal.name}")
+                        else:
+                            _log.warning(f"[msg_auto:{canal_id}] falha ao enviar promo V2")
+                    else:
+                        nova = await canal.send(c["mensagem"])
+                        update_canal_cfg(canal_id, ultima_msg_id=nova.id)
+                        _log.info(f"[msg_auto:{canal_id}] texto enviado em #{canal.name}")
                 except discord.Forbidden:
                     _log.warning(f"[msg_auto:{canal_id}] sem permissão pra enviar — desativando")
                     update_canal_cfg(canal_id, ativo=False)
