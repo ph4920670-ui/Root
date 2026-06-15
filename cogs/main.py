@@ -3635,7 +3635,10 @@ class MainCog(commands.Cog):
             except Exception:
                 pass
             txt = f"{DOLLAR} Preço voltou para **{preco_original} centavos**." if preco_centavos_era and preco_original else ""
-            await ctx.send(embed=_ok("Promoção encerrada!", txt), delete_after=8)
+            try:
+                await ctx.author.send(embed=_ok("Promoção encerrada!", txt))
+            except Exception:
+                pass
             return
 
         # Valida horário
@@ -3700,22 +3703,25 @@ class MainCog(commands.Cog):
         if cog_bc:
             cog_bc._start_aa_loop(ctx.channel.id)
 
-        # Remove o comando do canal e manda confirmação sumindo rápido
+        # Remove o comando do canal (sem deixar rastro)
         try:
             await ctx.message.delete()
         except Exception:
             pass
 
+        # Confirmação só via DM pro admin (canal fica limpo com apenas a V2)
         if cts is not None:
             titulo = f"{PRESENTE}  Mega Promoção ATIVADA!"
-            desc = f"{DOLLAR} Preço: **{cts} centavos** (R$ {cts/100:.2f}/sala)\n{CLOCK} Encerra às: **{h:02d}:{m:02d} BRT**"
+            desc = f"{DOLLAR} Preço: **{cts} centavos** (R$ {cts/100:.2f}/sala)\n{CLOCK} Encerra às: **{h:02d}:{m:02d} BRT**\n-# Use `+aa off` para encerrar antes."
         else:
             titulo = f"{PRESENTE}  Promoção ATIVADA!"
-            desc = f"{CLOCK} Promos neste canal até **{h:02d}:{m:02d} BRT** — a cada 30 min."
-
+            desc = f"{CLOCK} Promos neste canal até **{h:02d}:{m:02d} BRT** — a cada 30 min.\n-# Use `+aa off` para encerrar antes."
         em = _emb(titulo, config.COR_SUCESSO)
-        em.description = desc + f"\n-# Use `+aa off` para encerrar antes."
-        await ctx.send(embed=em, delete_after=10)
+        em.description = desc
+        try:
+            await ctx.author.send(embed=em)
+        except Exception:
+            pass  # DM fechada — sem confirmação
 
     @commands.command(name="painel")
     async def prefix_painel(self, ctx):
