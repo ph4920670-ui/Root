@@ -3629,19 +3629,31 @@ class MainCog(commands.Cog):
         await asyncio.to_thread(botconfig_save, cfg)
 
         # Dispara promo imediatamente em todos os canais ativos tipo "promo"
+        # e reinicia os loops para o próximo ciclo começar do zero agora
+        canais_reiniciados = 0
         try:
             ma = await asyncio.to_thread(get_msg_auto)
+            cog_bc = ctx.bot.get_cog("BotConfigCog")
             for c in ma.get("canais", []):
-                if c.get("ativo") and c.get("tipo") == "promo":
-                    try:
-                        payload = await asyncio.to_thread(
-                            _build_promo_v2_payload,
-                            c.get("mensagem", ""),
-                            c.get("mencionar_everyone", True),
-                        )
-                        await _post_promo_v2(int(c["canal_id"]), payload)
-                    except Exception as _ex:
-                        _log.warning(f"[+aa] erro enviando promo em {c['canal_id']}: {_ex}")
+                if not (c.get("ativo") and c.get("tipo") == "promo"):
+                    continue
+                cid = int(c["canal_id"])
+                try:
+                    payload = await asyncio.to_thread(
+                        _build_promo_v2_payload,
+                        c.get("mensagem", ""),
+                        c.get("mencionar_everyone", True),
+                    )
+                    nova_id = await _post_promo_v2(cid, payload)
+                    if nova_id:
+                        from cogs.botconfig import update_canal_cfg
+                        await asyncio.to_thread(update_canal_cfg, cid, ultima_msg_id=nova_id)
+                    # Reinicia o loop; skip_first_send=True porque acabamos de enviar
+                    if cog_bc:
+                        cog_bc._restart_canal(cid, skip_first_send=True)
+                    canais_reiniciados += 1
+                except Exception as _ex:
+                    _log.warning(f"[+aa] erro enviando promo em {cid}: {_ex}")
         except Exception as _ex:
             _log.warning(f"[+aa] erro disparando promos: {_ex}")
 

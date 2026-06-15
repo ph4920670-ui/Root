@@ -2181,6 +2181,7 @@ class BotConfigCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._canal_tasks: dict[int, asyncio.Task] = {}  # canal_id → task
+        self._skip_send_once: set[int] = set()           # canais que devem pular o 1º envio (acabaram de receber do +aa)
 
     async def cog_load(self):
         """Inicia loops dos canais que estavam ativos antes do restart."""
@@ -2272,8 +2273,10 @@ class BotConfigCog(commands.Cog):
             task.cancel()
         self._canal_tasks.pop(canal_id, None)
 
-    def _restart_canal(self, canal_id: int):
+    def _restart_canal(self, canal_id: int, skip_first_send: bool = False):
         self._stop_canal(canal_id)
+        if skip_first_send:
+            self._skip_send_once.add(canal_id)
         self._start_canal(canal_id)
 
     async def _canal_loop(self, canal_id: int):
@@ -2292,6 +2295,16 @@ class BotConfigCog(commands.Cog):
                     _log.warning(f"[msg_auto:{canal_id}] canal não encontrado — desativando")
                     update_canal_cfg(canal_id, ativo=False)
                     return
+
+                # Se +aa acabou de enviar a promo, pula este ciclo (só dorme)
+                if canal_id in self._skip_send_once:
+                    self._skip_send_once.discard(canal_id)
+                    c = get_canal_cfg(canal_id)
+                    if not c:
+                        return
+                    intervalo_seg = int(c.get("intervalo_min", 30)) * 60
+                    await asyncio.sleep(max(60, intervalo_seg))
+                    continue
 
                 # 1) Deleta mensagem anterior
                 ultima_id = c.get("ultima_msg_id")
