@@ -1025,3 +1025,4 @@ class RankingCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(RankingCog(bot))
+    bot.add_view(RankingPublicoView())  # registra a view persistente pra os botões sobreviverem ao restart

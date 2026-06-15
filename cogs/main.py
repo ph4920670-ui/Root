@@ -5113,3 +5113,10 @@ async def setup(bot):
             _sl_log.info(f"[setup] {_cog_name} OK")
         except Exception as _ex_cog:
             _sl_log.error(f"[setup] {_cog_name} FALHOU: {_ex_cog}", exc_info=True)
+
+    # Registra views persistentes (custom_id fixo) para os botões sobreviverem ao restart
+    for _ViewCls in [PainelView, SalaPublicaView]:
+        try:
+            bot.add_view(_ViewCls())
+        except Exception as _ex_v:
+            _sl_log.warning(f"[setup] add_view {_ViewCls.__name__}: {_ex_v}")
