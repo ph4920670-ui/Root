@@ -48,8 +48,16 @@ def _load_cfg():
     except:
         return {}
 
+def _cfg() -> dict:
+    """Lê config do Supabase (cache em memória) — única fonte da verdade."""
+    try:
+        from utils.database import botconfig_load
+        return botconfig_load()
+    except Exception:
+        return _load_cfg()  # fallback: arquivo local (só na inicialização antes do DB)
+
 def get_preco_por_sala() -> float:
-    return float(_load_cfg().get("preco_por_sala", _PRECO_DEFAULT))
+    return float(_cfg().get("preco_por_sala", _PRECO_DEFAULT))
 
 def get_preco_por_sala_guild(guild_id: str = None) -> float:
     if guild_id:
@@ -65,23 +73,29 @@ def get_banco_ativo(quantidade: int = None) -> str:
     Bancos: 'efi', 'mistic_15', 'mistic_35', 'dividido'
     Se 'dividido', usa mistic_15 abaixo do limite e mistic_35 acima.
     """
-    cfg = _load_cfg()
-    banco = cfg.get("banco_pix", "efi")
+    data = _cfg()
+    banco = data.get("banco_pix", "efi")
     if banco == "dividido" and quantidade is not None:
-        limite = int(cfg.get("banco_dividido_limite", 50))
+        limite = int(data.get("banco_dividido_limite", 50))
         return "mistic_15" if quantidade < limite else "mistic_35"
     if banco == "dividido":
         return "mistic_15"  # fallback sem quantidade
     return banco
 
 def set_banco_ativo(banco: str):
-    cfg = _load_cfg()
-    cfg["banco_pix"] = banco
-    with open(_cfg_path(), "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    try:
+        from utils.database import botconfig_load, botconfig_save
+        data = botconfig_load()
+        data["banco_pix"] = banco
+        botconfig_save(data)
+    except Exception:
+        cfg = _load_cfg()
+        cfg["banco_pix"] = banco
+        with open(_cfg_path(), "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 def get_banco_dividido_limite() -> int:
-    return int(_load_cfg().get("banco_dividido_limite", 50))
+    return int(_cfg().get("banco_dividido_limite", 50))
 
 def set_banco_dividido_limite(limite: int):
     cfg = _load_cfg()
