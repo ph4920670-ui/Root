@@ -3563,6 +3563,42 @@ class MainCog(commands.Cog):
         em.description = f"{DOT} Escolha o modo da sala:"
         await ctx.send(embed=em, view=C3ModoView())
 
+    @commands.command(name="mp")
+    async def prefix_mp(self, ctx):
+        """Envia a mensagem promo agora em todos os canais configurados como Promo V2."""
+        if not is_admin(ctx.author.id):
+            return
+        from cogs.botconfig import (
+            get_msg_auto, _build_promo_v2_payload, _post_promo_v2, update_canal_cfg,
+        )
+        ma = await asyncio.to_thread(get_msg_auto)
+        canais_promo = [c for c in ma.get("canais", []) if c.get("tipo") == "promo"]
+        if not canais_promo:
+            return await ctx.send(embed=_err(
+                "Nenhum canal Promo V2 configurado.",
+                "Vá em `/botconfig` → Msg Automática → Configurar Canal → Promo V2 / Texto.",
+            ))
+        cog_bc = ctx.bot.get_cog("BotConfigCog")
+        enviados = 0
+        for c in canais_promo:
+            cid = int(c["canal_id"])
+            try:
+                payload  = await asyncio.to_thread(
+                    _build_promo_v2_payload, c.get("mensagem", ""), c.get("mencionar_everyone", True)
+                )
+                nova_id  = await _post_promo_v2(cid, payload)
+                if nova_id:
+                    await asyncio.to_thread(update_canal_cfg, cid, ultima_msg_id=nova_id)
+                    if cog_bc and c.get("ativo"):
+                        cog_bc._restart_canal(cid, skip_first_send=True)
+                    enviados += 1
+            except Exception as _ex:
+                _log.warning(f"[+mp] erro em {cid}: {_ex}")
+        if enviados:
+            await ctx.message.add_reaction("✅")
+        else:
+            await ctx.send(embed=_err("Falha ao enviar em todos os canais.", "Veja os logs."))
+
     @commands.command(name="aa")
     async def prefix_aa(self, ctx, horario: str = None, centavos: str = None):
         """Liga/desliga mega-promoção. Uso: +aa HH:MM PRECO_CENTAVOS | +aa off"""
