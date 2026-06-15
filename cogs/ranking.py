@@ -206,9 +206,8 @@ def _build_ranking_embed(top10: list, premios: dict = None) -> discord.Embed:
     if premios is None:
         premios = {"salas": list(PREMIOS_SALAS_DEFAULT), "reais": list(PREMIOS_REAIS_DEFAULT)}
     premios_salas = premios["salas"]
-    premios_reais = premios["reais"]
 
-    em = discord.Embed(title="Ranking Diário — Top Criadores de Sala", color=0xFFD700)
+    em = discord.Embed(title="Ranking Diário — Top 5", color=0xFFD700)
 
     cabecalho = (
         f"{_em_str('calendario')}  **Hoje: {_hoje_str()}**\n"
@@ -220,20 +219,20 @@ def _build_ranking_embed(top10: list, premios: dict = None) -> discord.Embed:
         em.description = cabecalho + f"{_em_str('off')} *Nenhuma sala criada hoje ainda. Seja o primeiro!*"
     else:
         linhas = []
-        for idx, u in enumerate(top10):
+        for idx, u in enumerate(top10[:5]):
             badge = _pos_emoji(idx) if idx < 3 else _em_str("dot")
             nome  = (u.get("user_nome") or "Desconhecido")[:24]
             total = u.get("total", 0)
             s = "s" if total != 1 else ""
             if idx < 3:
-                premio_txt = f"  ╸ **+{premios_salas[idx]} salas + R${premios_reais[idx]:.0f}**"
+                premio_txt = f"  ╸ **+{premios_salas[idx]} salas**"
             else:
                 premio_txt = ""
             linhas.append(f"{badge} **{idx+1}º** **{nome}** — {total} sala{s}{premio_txt}")
         em.description = cabecalho + "\n".join(linhas)
 
     prizes = "\n".join(
-        f"{_pos_emoji(i)} **{i+1}º lugar** → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        f"{_pos_emoji(i)} **{i+1}º lugar** → +{premios_salas[i]} salas"
         for i in range(3)
     )
     em.add_field(name=f"{GIFT}  Prêmios (todo dia às 23:59)", value=prizes, inline=False)
@@ -283,11 +282,10 @@ def _build_ranking_v2_payload(top10: list = None) -> dict:
 
 
 def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
-    """Container V2 ephemeral com a tabela top 10 + prêmios + rodapé."""
+    """Container V2 ephemeral com a tabela top 5 + prêmios + rodapé."""
     if premios is None:
         premios = {"salas": list(PREMIOS_SALAS_DEFAULT), "reais": list(PREMIOS_REAIS_DEFAULT)}
     premios_salas = premios["salas"]
-    premios_reais = premios["reais"]
 
     if not top10:
         linhas_top = (
@@ -296,20 +294,20 @@ def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
         )
     else:
         linhas = []
-        for idx, u in enumerate(top10):
+        for idx, u in enumerate(top10[:5]):
             nome  = (u.get("user_nome") or "Desconhecido")[:24]
             total = u.get("total", 0)
             s = "s" if total != 1 else ""
             badge = _pos_emoji(idx) if idx < 3 else _em_str("dot")
             if idx < 3:
-                premio_txt = f" ╸ **+{premios_salas[idx]} salas + R${premios_reais[idx]:.0f}**"
+                premio_txt = f" ╸ **+{premios_salas[idx]} salas**"
             else:
                 premio_txt = ""
             linhas.append(f"{badge} **{idx+1}º** **{nome}** ╸ {total} sala{s}{premio_txt}")
         linhas_top = "\n".join(linhas)
 
     prizes_txt = "\n".join(
-        f"{_pos_emoji(i)} **{i+1}º lugar** ╸ +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        f"{_pos_emoji(i)} **{i+1}º lugar** ╸ +{premios_salas[i]} salas"
         for i in range(3)
     )
 
@@ -318,7 +316,7 @@ def _build_ranking_tabela_v2_payload(top10: list, premios: dict = None) -> dict:
         "type": 17,
         "accent_color": 0xFFD700,
         "components": [
-            {"id": 2, "type": 10, "content": f"## {_em_str('top')}  Ranking Diário — Top 10"},
+            {"id": 2, "type": 10, "content": f"## {_em_str('top')}  Ranking Diário — Top 5"},
             {"id": 3, "type": 10, "content": f"{_em_str('calendario')}  **Hoje:** {_hoje_str()}"},
             {"id": 4, "type": 14, "divider": True, "spacing": 2},
             {"id": 5, "type": 10, "content": linhas_top},
@@ -352,7 +350,7 @@ def _build_config_embed() -> discord.Embed:
     status    = f"{ON} **Ativo**" if ativo else f"{OFF} **Desativado**"
 
     prizes = "\n".join(
-        f"{_pos_emoji(i)} {i+1}º lugar → +{premios_salas[i]} salas + R${premios_reais[i]:.0f}"
+        f"{_pos_emoji(i)} {i+1}º lugar → +{premios_salas[i]} salas"
         for i in range(3)
     )
 
@@ -411,7 +409,7 @@ def _build_anuncio_v2_payload(top3: list, premios_salas: list, premios_reais: li
             s_reais = premios_reais[idx] if idx < len(premios_reais) else 0.0
             linhas.append(
                 f"{badge} **{idx+1}º** <@{uid}> ╸ {total} sala{s} criada{s}\n"
-                f"-# {_em_str('presente')} +{s_salas} salas  •  {_em_str('otherdollar')} R${s_reais:.0f}"
+                f"-# {_em_str('presente')} +{s_salas} salas"
             )
         corpo = "\n".join(linhas)
     else:

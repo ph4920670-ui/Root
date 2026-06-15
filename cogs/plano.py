@@ -538,13 +538,6 @@ def _build_painel_inf_payload() -> dict:
             "emoji":       _emj(p["emoji_key"]),
         })
 
-    linhas = [f"### {_emoji_str('otherdollar')}  Planos disponíveis"]
-    for p in PLANOS_INF.values():
-        emj = _emoji_str(p["emoji_key"])
-        linhas.append(
-            f"{emj}  **{p['nome']}** → R$ {p['preco']:.2f}  ·  *{p['desc']}*"
-        )
-
     return {
         "flags": FLAG_COMPONENTS_V2,
         "components": [{
@@ -554,9 +547,7 @@ def _build_painel_inf_payload() -> dict:
                     f"## {_emoji_str('swordbattle')} SALAS INFINITAS\n"
                     "Jogue sem limites — sem contar sala!"
                 )},
-                {"id": 3, "type": 14, "divider": True, "spacing": 1},
-                {"id": 4, "type": 10, "content": "\n".join(linhas)},
-                {"id": 5, "type": 1, "components": [{
+                {"id": 3, "type": 1, "components": [{
                     "type": 3,
                     "custom_id": "planosInf:select",
                     "placeholder": "Escolha seu plano…",
