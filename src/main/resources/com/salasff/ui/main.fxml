@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.*?>
+
+<BorderPane xmlns="http://javafx.com/javafx/17"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.salasff.ui.MainController"
+            prefWidth="900" prefHeight="620">
+
+    <!-- Top bar -->
+    <top>
+        <VBox style="-fx-background-color: #1a1a2e; -fx-padding: 12;">
+            <Label text="SalasFF Client — Free Fire Room Manager"
+                   style="-fx-font-size: 18; -fx-font-weight: bold; -fx-text-fill: #e94560;"/>
+        </VBox>
+    </top>
+
+    <!-- Left: controls -->
+    <left>
+        <VBox spacing="10" style="-fx-background-color: #16213e; -fx-padding: 14;" prefWidth="280">
+
+            <!-- API Key -->
+            <Label text="API Key" style="-fx-text-fill: #a8a8b3;"/>
+            <TextField fx:id="tfApiKey" promptText="SUA_CHAVE_AQUI"
+                       style="-fx-background-color: #0f3460; -fx-text-fill: white; -fx-prompt-text-fill: #555;"/>
+
+            <Separator/>
+
+            <!-- Load Modes -->
+            <Button fx:id="btnModos" text="1. Load Modes" maxWidth="Infinity"
+                    onAction="#onLoadModos"
+                    style="-fx-background-color: #e94560; -fx-text-fill: white; -fx-font-weight: bold;"/>
+
+            <Label text="Select Mode" style="-fx-text-fill: #a8a8b3;"/>
+            <ComboBox fx:id="cbModos" maxWidth="Infinity" promptText="— choose —"/>
+
+            <Separator/>
+
+            <!-- Create Room -->
+            <Label text="Auto-start (minutes, 1–10)" style="-fx-text-fill: #a8a8b3;"/>
+            <TextField fx:id="tfIniciar" promptText="4 (default)"
+                       style="-fx-background-color: #0f3460; -fx-text-fill: white; -fx-prompt-text-fill: #555;"/>
+
+            <Label text="Custom password (1–9999 | 99=random)" style="-fx-text-fill: #a8a8b3;"/>
+            <TextField fx:id="tfSenha" promptText="leave blank = mode default"
+                       style="-fx-background-color: #0f3460; -fx-text-fill: white; -fx-prompt-text-fill: #555;"/>
+
+            <Button fx:id="btnCriar" text="2. Create Room" maxWidth="Infinity"
+                    onAction="#onCriarSala"
+                    style="-fx-background-color: #0f9b58; -fx-text-fill: white; -fx-font-weight: bold;"/>
+
+            <Separator/>
+
+            <!-- Active rooms -->
+            <Button fx:id="btnListar" text="List Active Rooms" maxWidth="Infinity"
+                    onAction="#onListar"
+                    style="-fx-background-color: #533483; -fx-text-fill: white; -fx-font-weight: bold;"/>
+
+            <Separator/>
+
+            <!-- Actions on current room -->
+            <Label text="pedidoid (current room)" style="-fx-text-fill: #a8a8b3;"/>
+            <TextField fx:id="tfPedidoid" promptText="auto-filled on create"
+                       style="-fx-background-color: #0f3460; -fx-text-fill: white; -fx-prompt-text-fill: #555;"/>
+
+            <HBox spacing="6">
+                <Button fx:id="btnInfo" text="Poll Info" HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                        onAction="#onPollInfo"
+                        style="-fx-background-color: #1a6b9a; -fx-text-fill: white;"/>
+                <Button fx:id="btnIniciar" text="Start Match" HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                        onAction="#onIniciar"
+                        style="-fx-background-color: #c0392b; -fx-text-fill: white;"/>
+            </HBox>
+
+            <!-- Kick player -->
+            <Label text="Kick player ID" style="-fx-text-fill: #a8a8b3;"/>
+            <HBox spacing="6">
+                <TextField fx:id="tfJogadorId" promptText="player ID"
+                           style="-fx-background-color: #0f3460; -fx-text-fill: white; -fx-prompt-text-fill: #555;"
+                           HBox.hgrow="ALWAYS"/>
+                <Button text="Kick" onAction="#onExpulsar"
+                        style="-fx-background-color: #d35400; -fx-text-fill: white;"/>
+            </HBox>
+        </VBox>
+    </left>
+
+    <!-- Center: output log -->
+    <center>
+        <VBox style="-fx-background-color: #0d0d1a; -fx-padding: 10;" spacing="6">
+            <Label text="Output" style="-fx-text-fill: #a8a8b3; -fx-font-weight: bold;"/>
+            <TextArea fx:id="taOutput" editable="false" wrapText="true" VBox.vgrow="ALWAYS"
+                      style="-fx-control-inner-background: #0d0d1a; -fx-text-fill: #e0e0e0;
+                             -fx-font-family: monospace; -fx-font-size: 12;"/>
+            <Button text="Clear" onAction="#onClearLog" alignment="CENTER_RIGHT"
+                    style="-fx-background-color: #333; -fx-text-fill: #aaa;"/>
+        </VBox>
+    </center>
+
+    <!-- Bottom: status bar -->
+    <bottom>
+        <HBox style="-fx-background-color: #1a1a2e; -fx-padding: 6 12;">
+            <Label fx:id="lblStatus" text="Ready"
+                   style="-fx-text-fill: #a8a8b3; -fx-font-size: 11;"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>
