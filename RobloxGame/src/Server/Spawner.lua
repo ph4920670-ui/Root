@@ -33,6 +33,50 @@ local function applyBrawler(character, brawlerName)
 	end
 end
 
+-- monta o "chapéu/capacete" da skin e prende na cabeça
+local HAT_PRESETS = {
+	Cap    = { Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 2.2, 2.2), Offset = 0.7,  Rotate = true },
+	Box    = { Shape = Enum.PartType.Block,    Size = Vector3.new(2.2, 1.0, 2.2), Offset = 0.9,  Rotate = false },
+	Helmet = { Shape = Enum.PartType.Ball,     Size = Vector3.new(2.4, 2.4, 2.4), Offset = 0.4,  Rotate = false },
+	Cone   = { Shape = Enum.PartType.Cylinder, Size = Vector3.new(2.2, 1.6, 1.6), Offset = 1.0,  Rotate = true },
+}
+
+local function applySkin(character, skin)
+	if not skin then
+		return
+	end
+	-- tamanho do personagem
+	if skin.Scale and skin.Scale ~= 1 then
+		pcall(function()
+			character:ScaleTo(skin.Scale)
+		end)
+	end
+	-- chapéu
+	local preset = HAT_PRESETS[skin.Hat]
+	local head = character:FindFirstChild("Head")
+	if preset and head then
+		local hat = Instance.new("Part")
+		hat.Name = "BrawlHat"
+		hat.Shape = preset.Shape
+		hat.Size = preset.Size
+		hat.Color = skin.HatColor or Color3.fromRGB(60, 60, 60)
+		hat.Material = Enum.Material.SmoothPlastic
+		hat.CanCollide = false
+		hat.Massless = true
+		local cf = head.CFrame * CFrame.new(0, head.Size.Y / 2 + preset.Offset, 0)
+		if preset.Rotate then
+			cf = cf * CFrame.Angles(0, 0, math.rad(90)) -- deita o cilindro como "boné"
+		end
+		hat.CFrame = cf
+		hat.Parent = character
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = hat
+		weld.Part1 = head
+		weld.Parent = hat
+	end
+end
+
 -- nome + barra de vida acima da cabeça
 local function addNameplate(character, player)
 	local head = character:FindFirstChild("Head")
@@ -137,6 +181,7 @@ function Spawner.Spawn(player, brawlerName, cframe, onDied)
 	local humanoid = character:WaitForChild("Humanoid")
 
 	applyBrawler(character, brawlerName)
+	applySkin(character, (Brawlers[brawlerName] or {}).Skin)
 	character:PivotTo(cframe)
 	addNameplate(character, player)
 	addSpawnProtection(character)

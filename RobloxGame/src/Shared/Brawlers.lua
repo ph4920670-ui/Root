@@ -31,6 +31,8 @@ local Brawlers = {
 		ReloadTime = 0.7,
 		Color = Color3.fromRGB(255, 170, 60),
 		Special = { Damage = 30, Range = 42, Spread = 38, Cooldown = 8 },
+		-- aparência: Hat = "Cap" | "Box" | "Helmet" | "Cone"
+		Skin = { Hat = "Cap", HatColor = Color3.fromRGB(180, 110, 30), Scale = 1.0 },
 	},
 
 	Colt = {
@@ -44,6 +46,7 @@ local Brawlers = {
 		ReloadTime = 0.3,
 		Color = Color3.fromRGB(70, 130, 255),
 		Special = { Damage = 22, Range = 65, Spread = 6, Cooldown = 7 },
+		Skin = { Hat = "Box", HatColor = Color3.fromRGB(30, 60, 160), Scale = 0.98 },
 	},
 
 	Bull = {
@@ -57,6 +60,7 @@ local Brawlers = {
 		ReloadTime = 0.85,
 		Color = Color3.fromRGB(120, 90, 60),
 		Special = { Damage = 36, Range = 30, Spread = 40, Cooldown = 9 },
+		Skin = { Hat = "Helmet", HatColor = Color3.fromRGB(70, 50, 30), Scale = 1.2 },
 	},
 
 	Piper = {
@@ -70,6 +74,7 @@ local Brawlers = {
 		ReloadTime = 1.2,
 		Color = Color3.fromRGB(230, 80, 160),
 		Special = { Damage = 50, Range = 70, Spread = 3, Cooldown = 10 },
+		Skin = { Hat = "Cone", HatColor = Color3.fromRGB(170, 40, 110), Scale = 0.9 },
 	},
 }
 
