@@ -1,0 +1,21 @@
+{
+	"name": "BrawlArena",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"Shared": {
+				"$path": "src/Shared"
+			}
+		},
+		"ServerScriptService": {
+			"Server": {
+				"$path": "src/Server"
+			}
+		},
+		"StarterPlayer": {
+			"StarterPlayerScripts": {
+				"$path": "src/StarterPlayerScripts"
+			}
+		}
+	}
+}
