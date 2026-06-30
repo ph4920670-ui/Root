@@ -66,6 +66,22 @@ local function setupScene()
 	local sky = Instance.new("Sky")
 	sky.Name = "BA_Sky"
 	sky.Parent = Lighting
+
+	-- sombras ligadas
+	Lighting.GlobalShadows = true
+
+	-- nuvens no céu (fundo no lugar do céu vazio)
+	local terrain = workspace:FindFirstChildOfClass("Terrain")
+	if terrain then
+		local clouds = terrain:FindFirstChildOfClass("Clouds")
+		if not clouds then
+			clouds = Instance.new("Clouds")
+			clouds.Parent = terrain
+		end
+		clouds.Cover = 0.6
+		clouds.Density = 0.55
+		clouds.Color = Color3.fromRGB(255, 255, 255)
+	end
 end
 
 setupScene()

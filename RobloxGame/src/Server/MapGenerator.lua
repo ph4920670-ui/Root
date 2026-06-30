@@ -95,6 +95,49 @@ function MapGenerator.Build(mapDef)
 		pad.Transparency = 0.25
 	end
 
+	-- ===== DECORAÇÃO =====
+	-- postes de luz nos 4 cantos (com luz de verdade)
+	local cx, cz = halfX - 8, halfZ - 8
+	for _, corner in ipairs({
+		Vector3.new(cx, 0, cz), Vector3.new(-cx, 0, cz),
+		Vector3.new(cx, 0, -cz), Vector3.new(-cx, 0, -cz),
+	}) do
+		local pole = makePart("LampPole", Vector3.new(0.6, 11, 0.6),
+			corner + Vector3.new(0, 5.5, 0), Color3.fromRGB(40, 40, 48), Enum.Material.Metal, model)
+		local bulb = makePart("LampBulb", Vector3.new(1.6, 1.6, 1.6),
+			corner + Vector3.new(0, 11, 0), accent, Enum.Material.Neon, model)
+		bulb.Shape = Enum.PartType.Ball
+		local light = Instance.new("PointLight")
+		light.Color = accent
+		light.Brightness = 3
+		light.Range = 26
+		light.Parent = bulb
+		pole.CastShadow = true
+	end
+
+	-- barris (cilindros de madeira) e caixotes (blocos) espalhados pra dar cobertura
+	local props = {
+		{ kind = "barrel", pos = Vector3.new(15, 0, 0) },
+		{ kind = "barrel", pos = Vector3.new(-15, 0, 0) },
+		{ kind = "crate",  pos = Vector3.new(0, 0, 15) },
+		{ kind = "crate",  pos = Vector3.new(0, 0, -15) },
+		{ kind = "crate",  pos = Vector3.new(18, 0, 18) },
+		{ kind = "barrel", pos = Vector3.new(-18, 0, -18) },
+	}
+	for i, p in ipairs(props) do
+		if p.kind == "barrel" then
+			local b = makePart("Barrel" .. i, Vector3.new(3, 3.4, 3),
+				p.pos + Vector3.new(0, 1.7, 0), Color3.fromRGB(120, 80, 45), Enum.Material.WoodPlanks, model)
+			b.Shape = Enum.PartType.Cylinder
+			b.CFrame = CFrame.new(p.pos + Vector3.new(0, 1.7, 0)) * CFrame.Angles(0, 0, math.rad(90))
+			b.CastShadow = true
+		else
+			local c = makePart("Crate" .. i, Vector3.new(3.2, 3.2, 3.2),
+				p.pos + Vector3.new(0, 1.6, 0), Color3.fromRGB(150, 110, 65), Enum.Material.WoodPlanks, model)
+			c.CastShadow = true
+		end
+	end
+
 	model.Parent = workspace
 	return model
 end

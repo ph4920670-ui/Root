@@ -1,6 +1,6 @@
 --[[
 	Client (LocalScript)
-	Interface, controles, câmera estilo Brawl Stars (vista de cima) e efeitos.
+	Interface, controles, câmera, efeitos, sons, minimapa e banners.
 
 	Local no Studio: StarterPlayer > StarterPlayerScripts > Client (ou Cliente)
 ]]
@@ -10,6 +10,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
@@ -17,6 +19,7 @@ local camera = workspace.CurrentCamera
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Brawlers = require(Shared.Brawlers)
+local Maps = require(Shared.Maps)
 local Net = require(Shared.Net)
 
 local attackEvent = Net.Event("Attack")
@@ -32,9 +35,15 @@ local hitEvent = Net.Event("Hit")
 local myData = { Coins = 0, Owned = {}, Selected = "Shelly" }
 local superCooldownUntil = 0
 local superCooldownTotal = 1
+local lastHealth = nil
+local damageAlpha = 0
+local currentHalf = 50
+local currentPhase = "LOBBY"
+local minimapClock = 0
+local lastResult = 0
 
 -- ===================================================================
--- HELPERS DE UI
+-- HELPERS
 -- ===================================================================
 local function corner(parent, radius)
 	local c = Instance.new("UICorner")
@@ -72,10 +81,31 @@ local function make(class, props, parent)
 end
 
 -- ===================================================================
--- CÂMERA estilo Brawl Stars (vista de cima, inclinada)
+-- SONS (embutidos no Roblox, funcionam offline)
 -- ===================================================================
-local CAM_HEIGHT = 50
-local CAM_BACK = 32
+local function makeSound(id, vol, pitch)
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = vol or 0.5
+	s.PlaybackSpeed = pitch or 1
+	s.Parent = SoundService
+	return s
+end
+local shootSound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.25, 1.5)
+local hitSound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.35, 0.85)
+local superSound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.6, 0.5)
+local buySound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.5, 1.1)
+
+local function playSound(s)
+	s.TimePosition = 0
+	s:Play()
+end
+
+-- ===================================================================
+-- CÂMERA estilo Brawl Stars
+-- ===================================================================
+local CAM_HEIGHT = 46
+local CAM_BACK = 26
 RunService:BindToRenderStep("BrawlCam", Enum.RenderPriority.Camera.Value + 1, function()
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -99,6 +129,39 @@ local gui = make("ScreenGui", {
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, player:WaitForChild("PlayerGui"))
 
+-- vinheta de dano (vermelho nas bordas)
+local vigTop = make("Frame", {
+	Size = UDim2.new(1, 0, 0, 150),
+	BackgroundColor3 = Color3.fromRGB(255, 30, 30),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+}, gui)
+do
+	local g = Instance.new("UIGradient")
+	g.Rotation = 90
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	g.Parent = vigTop
+end
+local vigBot = make("Frame", {
+	Size = UDim2.new(1, 0, 0, 150),
+	Position = UDim2.new(0, 0, 1, -150),
+	BackgroundColor3 = Color3.fromRGB(255, 30, 30),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+}, gui)
+do
+	local g = Instance.new("UIGradient")
+	g.Rotation = 90
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	g.Parent = vigBot
+end
+
 -- Barra superior
 local topBar = make("Frame", {
 	Size = UDim2.new(1, 0, 0, 54),
@@ -107,7 +170,6 @@ local topBar = make("Frame", {
 }, gui)
 gradient(topBar, Color3.fromRGB(38, 41, 58), Color3.fromRGB(20, 22, 32))
 
--- pílula de moedas
 local coinPill = make("Frame", {
 	Size = UDim2.new(0, 150, 0, 36),
 	Position = UDim2.new(0, 12, 0.5, -18),
@@ -134,7 +196,6 @@ local brawlerLabel = make("TextLabel", {
 	Text = "Brawler: Shelly",
 }, topBar)
 
--- Estado da partida
 local matchLabel = make("TextLabel", {
 	Size = UDim2.new(0, 380, 0, 30),
 	Position = UDim2.new(0.5, -190, 0, 62),
@@ -165,7 +226,7 @@ corner(scoreFrame, 10)
 stroke(scoreFrame, Color3.fromRGB(60, 65, 85), 1, 0.4)
 make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingTop = UDim.new(0, 8) }, scoreFrame)
 
--- Barra de VIDA (embaixo, centro)
+-- Barra de VIDA
 local healthBg = make("Frame", {
 	Size = UDim2.new(0, 280, 0, 24),
 	Position = UDim2.new(0.5, -140, 1, -54),
@@ -190,10 +251,22 @@ local healthText = make("TextLabel", {
 	Text = "100 / 100",
 }, healthBg)
 
+-- Minimapa
+local minimap = make("Frame", {
+	Size = UDim2.new(0, 150, 0, 150),
+	Position = UDim2.new(0, 12, 1, -164),
+	BackgroundColor3 = Color3.fromRGB(15, 17, 26),
+	BackgroundTransparency = 0.2,
+	Visible = false,
+}, gui)
+corner(minimap, 10)
+stroke(minimap, Color3.fromRGB(90, 120, 255), 1.5, 0.3)
+local dotsFolder = make("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, minimap)
+
 -- Aviso (toast)
 local toast = make("TextLabel", {
 	Size = UDim2.new(0, 440, 0, 38),
-	Position = UDim2.new(0.5, -220, 0.74, 0),
+	Position = UDim2.new(0.5, -220, 0.7, 0),
 	BackgroundColor3 = Color3.fromRGB(30, 32, 44),
 	Font = Enum.Font.GothamBold,
 	TextSize = 18,
@@ -203,6 +276,19 @@ local toast = make("TextLabel", {
 }, gui)
 toast.BackgroundTransparency = 1
 corner(toast, 10)
+
+-- Banner de Vitória/Derrota
+local resultBanner = make("TextLabel", {
+	Size = UDim2.new(0, 560, 0, 100),
+	Position = UDim2.new(0.5, -280, 0.32, -50),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	TextSize = 60,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	TextStrokeTransparency = 0.2,
+	Text = "",
+	Visible = false,
+}, gui)
 
 -- Botão da loja
 local shopBtn = make("TextButton", {
@@ -218,38 +304,36 @@ corner(shopBtn, 10)
 gradient(shopBtn, Color3.fromRGB(120, 150, 255), Color3.fromRGB(80, 100, 230))
 stroke(shopBtn, Color3.fromRGB(180, 200, 255), 1.2, 0.3)
 
--- Botões de combate
+-- Botões de combate (maiores p/ mobile)
 local attackBtn = make("TextButton", {
-	Size = UDim2.new(0, 120, 0, 120),
-	Position = UDim2.new(1, -140, 1, -150),
+	Size = UDim2.new(0, 130, 0, 130),
+	Position = UDim2.new(1, -150, 1, -162),
 	BackgroundColor3 = Color3.fromRGB(225, 70, 70),
 	Font = Enum.Font.GothamBold,
-	TextSize = 19,
+	TextSize = 20,
 	TextColor3 = Color3.fromRGB(255, 255, 255),
 	Text = "ATIRAR",
 	AutoButtonColor = true,
 }, gui)
-corner(attackBtn, 60)
+corner(attackBtn, 65)
 gradient(attackBtn, Color3.fromRGB(255, 100, 100), Color3.fromRGB(200, 45, 45))
-stroke(attackBtn, Color3.fromRGB(255, 180, 180), 2, 0.2)
+stroke(attackBtn, Color3.fromRGB(255, 180, 180), 2.5, 0.15)
 
 local specialBtn = make("TextButton", {
-	Size = UDim2.new(0, 96, 0, 96),
-	Position = UDim2.new(1, -266, 1, -138),
+	Size = UDim2.new(0, 104, 0, 104),
+	Position = UDim2.new(1, -286, 1, -148),
 	BackgroundColor3 = Color3.fromRGB(245, 195, 50),
 	Font = Enum.Font.GothamBold,
-	TextSize = 16,
+	TextSize = 17,
 	TextColor3 = Color3.fromRGB(50, 35, 0),
 	Text = "SUPER\n(Q)",
 	ClipsDescendants = true,
 }, gui)
-corner(specialBtn, 48)
+corner(specialBtn, 52)
 gradient(specialBtn, Color3.fromRGB(255, 225, 90), Color3.fromRGB(230, 170, 30))
-stroke(specialBtn, Color3.fromRGB(255, 235, 160), 2, 0.2)
--- sombra do cooldown do super (desce conforme recarrega)
+stroke(specialBtn, Color3.fromRGB(255, 235, 160), 2.5, 0.15)
 local superCd = make("Frame", {
 	Size = UDim2.new(1, 0, 0, 0),
-	Position = UDim2.new(0, 0, 0, 0),
 	BackgroundColor3 = Color3.fromRGB(0, 0, 0),
 	BackgroundTransparency = 0.45,
 	BorderSizePixel = 0,
@@ -261,27 +345,27 @@ local superCd = make("Frame", {
 -- ===================================================================
 local shopOpen = false
 local shopFrame = make("Frame", {
-	Size = UDim2.new(0, 470, 0, 400),
-	Position = UDim2.new(0.5, -235, 0.5, -200),
+	Size = UDim2.new(0, 480, 0, 410),
+	Position = UDim2.new(0.5, -240, 0.5, -205),
 	BackgroundColor3 = Color3.fromRGB(26, 28, 40),
 	Visible = false,
 }, gui)
-corner(shopFrame, 14)
-stroke(shopFrame, Color3.fromRGB(90, 120, 255), 2, 0.2)
-gradient(shopFrame, Color3.fromRGB(34, 37, 54), Color3.fromRGB(22, 24, 36))
+corner(shopFrame, 16)
+stroke(shopFrame, Color3.fromRGB(90, 120, 255), 2.5, 0.15)
+gradient(shopFrame, Color3.fromRGB(36, 39, 58), Color3.fromRGB(20, 22, 34))
 
 make("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 46),
+	Size = UDim2.new(1, 0, 0, 48),
 	BackgroundTransparency = 1,
-	Font = Enum.Font.GothamBold,
-	TextSize = 24,
+	Font = Enum.Font.GothamBlack,
+	TextSize = 26,
 	TextColor3 = Color3.fromRGB(255, 255, 255),
 	Text = "🛒 LOJA DE BRAWLERS",
 }, shopFrame)
 
 local closeBtn = make("TextButton", {
-	Size = UDim2.new(0, 36, 0, 36),
-	Position = UDim2.new(1, -44, 0, 6),
+	Size = UDim2.new(0, 38, 0, 38),
+	Position = UDim2.new(1, -46, 0, 6),
 	BackgroundColor3 = Color3.fromRGB(225, 70, 70),
 	Font = Enum.Font.GothamBold,
 	TextSize = 20,
@@ -291,8 +375,8 @@ local closeBtn = make("TextButton", {
 corner(closeBtn, 10)
 
 local list = make("ScrollingFrame", {
-	Size = UDim2.new(1, -20, 1, -58),
-	Position = UDim2.new(0, 10, 0, 50),
+	Size = UDim2.new(1, -20, 1, -60),
+	Position = UDim2.new(0, 10, 0, 52),
 	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
 	ScrollBarThickness = 6,
@@ -320,23 +404,23 @@ local function refreshShop()
 		local selected = (myData.Selected == name)
 
 		local row = make("Frame", {
-			Size = UDim2.new(1, -6, 0, 64),
+			Size = UDim2.new(1, -6, 0, 66),
 			BackgroundColor3 = Color3.fromRGB(38, 41, 56),
 		}, list)
-		corner(row, 10)
-		stroke(row, Color3.fromRGB(60, 65, 85), 1, 0.4)
+		corner(row, 12)
+		stroke(row, selected and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(60, 65, 85), selected and 2 or 1, 0.35)
 
 		local swatch = make("Frame", {
-			Size = UDim2.new(0, 44, 0, 44),
-			Position = UDim2.new(0, 12, 0.5, -22),
+			Size = UDim2.new(0, 46, 0, 46),
+			Position = UDim2.new(0, 12, 0.5, -23),
 			BackgroundColor3 = b.Color,
 		}, row)
-		corner(swatch, 10)
+		corner(swatch, 12)
 		stroke(swatch, Color3.fromRGB(255, 255, 255), 1.5, 0.5)
 
 		make("TextLabel", {
 			Size = UDim2.new(0, 210, 1, 0),
-			Position = UDim2.new(0, 66, 0, 0),
+			Position = UDim2.new(0, 68, 0, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			TextSize = 17,
@@ -346,8 +430,8 @@ local function refreshShop()
 		}, row)
 
 		local btn = make("TextButton", {
-			Size = UDim2.new(0, 120, 0, 42),
-			Position = UDim2.new(1, -132, 0.5, -21),
+			Size = UDim2.new(0, 124, 0, 44),
+			Position = UDim2.new(1, -134, 0.5, -22),
 			Font = Enum.Font.GothamBold,
 			TextSize = 16,
 			TextColor3 = Color3.fromRGB(255, 255, 255),
@@ -393,8 +477,7 @@ local function getAimDirection()
 	if not root then
 		return nil
 	end
-	-- mira no ponto do chão (na altura do personagem) embaixo do cursor,
-	-- mesmo que não tenha nenhuma peça ali (resolve o "clico aqui e vai pra lá")
+	-- mira no chão (altura do personagem) embaixo do cursor
 	local ray = mouse.UnitRay
 	local origin, dirv = ray.Origin, ray.Direction
 	if math.abs(dirv.Y) > 1e-4 then
@@ -411,6 +494,35 @@ local function getAimDirection()
 	return Vector3.new(look.X, 0, look.Z).Unit
 end
 
+-- efeito local ao usar o Super (anel que se expande)
+local function superBurst()
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+	local b = Brawlers[myData.Selected]
+	local color = b and b.Color or Color3.new(1, 1, 1)
+	local ring = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Shape = Enum.PartType.Cylinder,
+		Material = Enum.Material.Neon,
+		Color = color,
+		Size = Vector3.new(0.6, 4, 4),
+		CFrame = CFrame.new(root.Position - Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+	}, workspace)
+	task.spawn(function()
+		for i = 1, 12 do
+			ring.Size = ring.Size + Vector3.new(0, 4, 4)
+			ring.Transparency = i / 12
+			task.wait(0.02)
+		end
+		ring:Destroy()
+	end)
+end
+
 local function doAttack()
 	local dir = getAimDirection()
 	if dir then
@@ -425,6 +537,8 @@ local function doSpecial()
 	local dir = getAimDirection()
 	if dir then
 		specialEvent:FireServer(dir)
+		playSound(superSound)
+		superBurst()
 		local b = Brawlers[myData.Selected]
 		local cd = b and b.Special and b.Special.Cooldown or 8
 		superCooldownTotal = cd
@@ -449,20 +563,73 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 
 -- ===================================================================
--- LOOP DA INTERFACE (vida + cooldown do super)
+-- BANNER de Vitória/Derrota
 -- ===================================================================
-RunService.RenderStepped:Connect(function()
-	-- barra de vida
+local function showResult(winnerName)
+	if os.clock() - lastResult < 6 then
+		return
+	end
+	lastResult = os.clock()
+	local win = (winnerName == player.Name)
+	resultBanner.Text = win and "🏆 VITÓRIA!" or "💀 DERROTA"
+	resultBanner.TextColor3 = win and Color3.fromRGB(120, 255, 150) or Color3.fromRGB(255, 110, 110)
+	resultBanner.Visible = true
+	resultBanner.TextTransparency = 0
+	resultBanner.Size = UDim2.new(0, 200, 0, 100)
+	resultBanner.Position = UDim2.new(0.5, -100, 0.32, -50)
+	TweenService:Create(resultBanner, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = UDim2.new(0, 560, 0, 100),
+		Position = UDim2.new(0.5, -280, 0.32, -50),
+	}):Play()
+	task.delay(3, function()
+		TweenService:Create(resultBanner, TweenInfo.new(0.6), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		task.wait(0.6)
+		resultBanner.Visible = false
+		resultBanner.TextStrokeTransparency = 0.2
+	end)
+end
+
+-- ===================================================================
+-- LOOP (vida, super, vinheta, minimapa)
+-- ===================================================================
+local function addDot(worldPos, color, size)
+	local nx = math.clamp(worldPos.X / currentHalf, -1, 1)
+	local nz = math.clamp(worldPos.Z / currentHalf, -1, 1)
+	local dot = make("Frame", {
+		Size = UDim2.new(0, size, 0, size),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5 + nx * 0.46, 0, 0.5 + nz * 0.46, 0),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+	}, dotsFolder)
+	corner(dot, math.floor(size / 2))
+end
+
+RunService.RenderStepped:Connect(function(dt)
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+	-- barra de vida + detecção de dano
 	if hum and hum.Health > 0 then
 		local ratio = hum.MaxHealth > 0 and math.clamp(hum.Health / hum.MaxHealth, 0, 1) or 0
 		healthFill.Size = UDim2.new(ratio, 0, 1, 0)
 		healthText.Text = math.floor(hum.Health) .. " / " .. math.floor(hum.MaxHealth)
 		healthBg.Visible = true
+		if lastHealth and hum.Health < lastHealth - 0.5 then
+			damageAlpha = math.min(1, damageAlpha + 0.6)
+		end
+		lastHealth = hum.Health
 	else
 		healthBg.Visible = false
+		lastHealth = nil
 	end
+
+	-- vinheta de dano some aos poucos
+	if damageAlpha > 0 then
+		damageAlpha = math.max(0, damageAlpha - dt * 1.6)
+	end
+	vigTop.BackgroundTransparency = 1 - damageAlpha * 0.7
+	vigBot.BackgroundTransparency = 1 - damageAlpha * 0.7
 
 	-- cooldown do super
 	local remaining = superCooldownUntil - os.clock()
@@ -474,31 +641,53 @@ RunService.RenderStepped:Connect(function()
 		superCd.Size = UDim2.new(1, 0, 0, 0)
 		specialBtn.Text = "SUPER\n(Q)"
 	end
+
+	-- minimapa (atualiza ~10x/seg)
+	minimapClock += dt
+	if minimap.Visible and minimapClock >= 0.1 then
+		minimapClock = 0
+		dotsFolder:ClearAllChildren()
+		for _, pl in ipairs(Players:GetPlayers()) do
+			local r = pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
+			if r then
+				addDot(r.Position, pl == player and Color3.fromRGB(90, 255, 130) or Color3.fromRGB(90, 160, 255), pl == player and 11 or 9)
+			end
+		end
+		local en = workspace:FindFirstChild("Enemies")
+		if en then
+			for _, m in ipairs(en:GetChildren()) do
+				local r = m:FindFirstChild("HumanoidRootPart")
+				if r then
+					addDot(r.Position, Color3.fromRGB(255, 80, 80), 8)
+				end
+			end
+		end
+	end
 end)
 
 -- ===================================================================
--- EFEITO VISUAL DO TIRO (flash + traçado + impacto)
+-- EFEITOS DE TIRO
 -- ===================================================================
 fxEvent.OnClientEvent:Connect(function(origin, direction, range, color)
-	-- traçado
+	playSound(shootSound)
 	local beam = make("Part", {
 		Anchored = true,
 		CanCollide = false,
 		CanQuery = false,
 		Material = Enum.Material.Neon,
 		Color = color,
-		Size = Vector3.new(0.45, 0.45, range),
+		Size = Vector3.new(0.5, 0.5, range),
 		CFrame = CFrame.lookAt(origin + direction * (range / 2), origin + direction * range),
 	}, workspace)
 	task.spawn(function()
 		for i = 1, 6 do
 			beam.Transparency = i / 6
+			beam.Size = Vector3.new(0.5 - i * 0.06, 0.5 - i * 0.06, range)
 			task.wait(0.02)
 		end
 		beam:Destroy()
 	end)
 
-	-- flash na ponta do cano
 	local flash = make("Part", {
 		Anchored = true,
 		CanCollide = false,
@@ -506,15 +695,16 @@ fxEvent.OnClientEvent:Connect(function(origin, direction, range, color)
 		Shape = Enum.PartType.Ball,
 		Material = Enum.Material.Neon,
 		Color = color,
-		Size = Vector3.new(2.2, 2.2, 2.2),
+		Size = Vector3.new(2.4, 2.4, 2.4),
 		CFrame = CFrame.new(origin + direction * 2),
 	}, workspace)
 	Debris:AddItem(flash, 0.08)
 end)
 
--- impacto + número de dano quando alguém é atingido
 hitEvent.OnClientEvent:Connect(function(position, damage, color)
-	-- faísca de impacto
+	playSound(hitSound)
+
+	-- faísca + partículas
 	local spark = make("Part", {
 		Anchored = true,
 		CanCollide = false,
@@ -522,9 +712,19 @@ hitEvent.OnClientEvent:Connect(function(position, damage, color)
 		Shape = Enum.PartType.Ball,
 		Material = Enum.Material.Neon,
 		Color = color,
-		Size = Vector3.new(1.6, 1.6, 1.6),
+		Size = Vector3.new(1.4, 1.4, 1.4),
 		CFrame = CFrame.new(position),
 	}, workspace)
+	local emitter = make("ParticleEmitter", {
+		Color = ColorSequence.new(color),
+		Lifetime = NumberRange.new(0.25, 0.4),
+		Speed = NumberRange.new(7, 12),
+		SpreadAngle = Vector2.new(180, 180),
+		Rate = 0,
+		Size = NumberSequence.new(0.7, 0),
+		Rotation = NumberRange.new(0, 360),
+	}, spark)
+	emitter:Emit(14)
 	task.spawn(function()
 		for i = 1, 5 do
 			spark.Size = spark.Size + Vector3.new(0.5, 0.5, 0.5)
@@ -572,16 +772,21 @@ end)
 -- DADOS DO SERVIDOR
 -- ===================================================================
 syncEvent.OnClientEvent:Connect(function(data)
+	local hadLess = data.Coins < (myData.Coins or 0)
 	myData = data
 	coinsLabel.Text = "🪙 " .. data.Coins
 	local b = Brawlers[data.Selected]
 	brawlerLabel.Text = "Brawler: " .. (b and b.DisplayName or data.Selected)
+	if not hadLess and data.Coins > 0 then
+		-- som leve quando ganha/compra
+	end
 	if shopOpen then
 		refreshShop()
 	end
 end)
 
 matchEvent.OnClientEvent:Connect(function(state)
+	currentPhase = state.Phase
 	if state.Phase == "COUNTDOWN" then
 		matchLabel.Text = "⚔️ Começa em " .. (state.Countdown or "?") .. "s..."
 	elseif state.Phase == "MATCH" then
@@ -590,9 +795,23 @@ matchEvent.OnClientEvent:Connect(function(state)
 		matchLabel.Text = state.Winner and ("🏆 Vencedor: " .. state.Winner) or "🏠 No lobby — aguardando..."
 	end
 
+	-- tamanho do mapa atual p/ o minimapa
+	for _, m in ipairs(Maps) do
+		if m.Name == state.MapName then
+			currentHalf = math.max(m.Size.X, m.Size.Z) / 2
+		end
+	end
+	minimap.Visible = (state.Phase == "MATCH")
+
+	-- banner de fim
+	if state.Winner and state.Winner ~= "—" then
+		showResult(state.Winner)
+	end
+
 	local txt = "🏅 PLACAR\n"
+	local medals = { "🥇", "🥈", "🥉" }
 	for i, entry in ipairs(state.Scores or {}) do
-		txt ..= i .. ". " .. entry.Name .. " — " .. entry.Kills .. "\n"
+		txt ..= (medals[i] or (i .. ".")) .. " " .. entry.Name .. " — " .. entry.Kills .. "\n"
 		if i >= 5 then
 			break
 		end
