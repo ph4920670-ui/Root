@@ -138,6 +138,85 @@ function MapGenerator.Build(mapDef)
 		end
 	end
 
+	-- ===== TEMA DE VILA (mapas com Theme == "Village") =====
+	if mapDef.Theme == "Village" then
+		-- casas (cubo + telhado)
+		for i, h in ipairs(mapDef.Houses or {}) do
+			local roofColor = h.RoofColor or Color3.fromRGB(170, 60, 50)
+			local base = makePart("House" .. i, Vector3.new(7, 5, 7), h.Pos + Vector3.new(0, 2.5, 0),
+				h.Color or Color3.fromRGB(225, 200, 160), Enum.Material.SmoothPlastic, model)
+			base.CastShadow = true
+			local roof = makePart("HouseRoof" .. i, Vector3.new(8.6, 0.6, 8.6), h.Pos + Vector3.new(0, 5.3, 0),
+				roofColor, Enum.Material.SmoothPlastic, model)
+			roof.CastShadow = true
+			makePart("HouseCap" .. i, Vector3.new(1, 1.6, 1), h.Pos + Vector3.new(0, 6.3, 0),
+				roofColor, Enum.Material.SmoothPlastic, model)
+		end
+
+		-- torre central
+		for i, t in ipairs(mapDef.Towers or {}) do
+			local tower = makePart("Tower" .. i, Vector3.new(11, t.Height, 11),
+				t.Pos + Vector3.new(0, t.Height / 2, 0), Color3.fromRGB(225, 200, 160), Enum.Material.Concrete, model)
+			tower.CastShadow = true
+			makePart("TowerRoof" .. i, Vector3.new(13, 1, 13), t.Pos + Vector3.new(0, t.Height + 0.5, 0),
+				Color3.fromRGB(170, 60, 50), Enum.Material.SmoothPlastic, model)
+		end
+
+		-- bonecos de treino (postes)
+		for i, pp in ipairs(mapDef.TrainingPosts or {}) do
+			makePart("TrainingPost" .. i, Vector3.new(1, 4, 1), pp + Vector3.new(0, 2, 0),
+				Color3.fromRGB(120, 90, 60), Enum.Material.Wood, model)
+		end
+
+		-- floresta (árvores)
+		for i, tp in ipairs(mapDef.Trees or {}) do
+			makePart("TreeTrunk" .. i, Vector3.new(1.4, 5, 1.4), tp + Vector3.new(0, 2.5, 0),
+				Color3.fromRGB(90, 60, 40), Enum.Material.Wood, model)
+			local leaves = makePart("TreeLeaves" .. i, Vector3.new(6, 6, 6), tp + Vector3.new(0, 7, 0),
+				Color3.fromRGB(55, 125, 65), Enum.Material.Grass, model)
+			leaves.Shape = Enum.PartType.Ball
+			leaves.CastShadow = true
+		end
+
+		-- monumento (parede de pedra com emblemas circulares)
+		if mapDef.Monument then
+			local mPos = mapDef.Monument.Pos
+			makePart("MonumentWall", Vector3.new(40, 16, 3), mPos + Vector3.new(0, 8, 0),
+				Color3.fromRGB(150, 145, 140), Enum.Material.Rock, model)
+			for i = 1, 4 do
+				local ex = (i - 2.5) * 9
+				local emblem = makePart("MonumentEmblem" .. i, Vector3.new(5, 5, 0.6),
+					mPos + Vector3.new(ex, 9, -1.8), accent, Enum.Material.Neon, model)
+				emblem.Shape = Enum.PartType.Cylinder
+				emblem.CFrame = CFrame.new(mPos + Vector3.new(ex, 9, -1.8)) * CFrame.Angles(0, 0, math.rad(90))
+			end
+		end
+
+		-- portão de entrada (arco decorativo)
+		if mapDef.Gate then
+			local gp = mapDef.Gate.Pos
+			makePart("GatePillarL", Vector3.new(2, 12, 2), gp + Vector3.new(-7, 6, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
+			makePart("GatePillarR", Vector3.new(2, 12, 2), gp + Vector3.new(7, 6, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
+			makePart("GateBeam", Vector3.new(18, 1.4, 2), gp + Vector3.new(0, 12, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
+			makePart("GateBeam2", Vector3.new(20, 1, 2.4), gp + Vector3.new(0, 10, 0), Color3.fromRGB(200, 80, 60), Enum.Material.Wood, model)
+		end
+
+		-- arena (anel circular de muretas)
+		if mapDef.Arena then
+			local ap = mapDef.Arena.Pos
+			local radius = mapDef.Arena.Radius or 14
+			local segs = 16
+			for i = 1, segs do
+				local angle = (i - 1) * (2 * math.pi / segs)
+				local pos = ap + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+				local seg = makePart("ArenaWall" .. i, Vector3.new(3.2, 3, 1), pos + Vector3.new(0, 1.5, 0),
+					Color3.fromRGB(190, 170, 130), Enum.Material.Sandstone, model)
+				seg.CFrame = CFrame.new(pos + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, -angle, 0)
+				seg.CastShadow = true
+			end
+		end
+	end
+
 	model.Parent = workspace
 	return model
 end
