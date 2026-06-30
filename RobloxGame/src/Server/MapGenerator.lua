@@ -1,7 +1,7 @@
 --[[
 	MapGenerator (ModuleScript)
-	Constrói um mapa em 3D a partir da definição em Shared/Maps.
-	Cria chão, paredes em volta (pra ninguém cair) e os obstáculos.
+	Constrói o mapa em 3D a partir de Shared/Maps, com acabamento bonito:
+	borda neon, paredes de vidro, pads de nascimento iluminados e obstáculos.
 
 	Local no Studio: ServerScriptService > Server > MapGenerator
 ]]
@@ -25,34 +25,74 @@ local function makePart(name, size, position, color, material, parent)
 	return p
 end
 
--- Constrói o mapa no workspace e devolve o Model criado
+-- clareia uma cor pra usar como "neon de destaque"
+local function accentOf(color)
+	return Color3.new(
+		math.min(1, color.R * 0.5 + 0.5),
+		math.min(1, color.G * 0.5 + 0.55),
+		math.min(1, color.B * 0.5 + 0.6)
+	)
+end
+
 function MapGenerator.Build(mapDef)
 	local model = Instance.new("Model")
 	model.Name = "Map_" .. mapDef.Name
+	local accent = accentOf(mapDef.FloorColor)
 
 	-- chão (topo em y = 0)
-	makePart("Floor", mapDef.Size, Vector3.new(0, -mapDef.Size.Y / 2, 0),
+	local floor = makePart("Floor", mapDef.Size, Vector3.new(0, -mapDef.Size.Y / 2, 0),
 		mapDef.FloorColor, mapDef.Material, model)
+	floor.Reflectance = 0.02
 
-	-- paredes em volta
 	local halfX = mapDef.Size.X / 2
 	local halfZ = mapDef.Size.Z / 2
-	local wallColor = mapDef.ObstacleColor
-	local wallMat = Enum.Material.Concrete
-	makePart("WallN", Vector3.new(mapDef.Size.X + WALL_THICK * 2, WALL_HEIGHT, WALL_THICK),
-		Vector3.new(0, WALL_HEIGHT / 2, halfZ + WALL_THICK / 2), wallColor, wallMat, model)
-	makePart("WallS", Vector3.new(mapDef.Size.X + WALL_THICK * 2, WALL_HEIGHT, WALL_THICK),
-		Vector3.new(0, WALL_HEIGHT / 2, -halfZ - WALL_THICK / 2), wallColor, wallMat, model)
-	makePart("WallE", Vector3.new(WALL_THICK, WALL_HEIGHT, mapDef.Size.Z),
-		Vector3.new(halfX + WALL_THICK / 2, WALL_HEIGHT / 2, 0), wallColor, wallMat, model)
-	makePart("WallW", Vector3.new(WALL_THICK, WALL_HEIGHT, mapDef.Size.Z),
-		Vector3.new(-halfX - WALL_THICK / 2, WALL_HEIGHT / 2, 0), wallColor, wallMat, model)
 
-	-- obstáculos (a base fica no nível do chão)
+	-- paredes de vidro escuro
+	local function wall(name, size, pos)
+		local w = makePart(name, size, pos, Color3.fromRGB(40, 44, 56), Enum.Material.Glass, model)
+		w.Transparency = 0.35
+		w.Reflectance = 0.15
+		return w
+	end
+	wall("WallN", Vector3.new(mapDef.Size.X + WALL_THICK * 2, WALL_HEIGHT, WALL_THICK),
+		Vector3.new(0, WALL_HEIGHT / 2, halfZ + WALL_THICK / 2))
+	wall("WallS", Vector3.new(mapDef.Size.X + WALL_THICK * 2, WALL_HEIGHT, WALL_THICK),
+		Vector3.new(0, WALL_HEIGHT / 2, -halfZ - WALL_THICK / 2))
+	wall("WallE", Vector3.new(WALL_THICK, WALL_HEIGHT, mapDef.Size.Z),
+		Vector3.new(halfX + WALL_THICK / 2, WALL_HEIGHT / 2, 0))
+	wall("WallW", Vector3.new(WALL_THICK, WALL_HEIGHT, mapDef.Size.Z),
+		Vector3.new(-halfX - WALL_THICK / 2, WALL_HEIGHT / 2, 0))
+
+	-- trilho neon no topo das bordas
+	local trimH = 0.6
+	local trimY = WALL_HEIGHT + trimH / 2
+	local function trim(size, pos)
+		local t = makePart("Trim", size, pos, accent, Enum.Material.Neon, model)
+		return t
+	end
+	trim(Vector3.new(mapDef.Size.X + WALL_THICK * 2, trimH, WALL_THICK), Vector3.new(0, trimY, halfZ + WALL_THICK / 2))
+	trim(Vector3.new(mapDef.Size.X + WALL_THICK * 2, trimH, WALL_THICK), Vector3.new(0, trimY, -halfZ - WALL_THICK / 2))
+	trim(Vector3.new(WALL_THICK, trimH, mapDef.Size.Z), Vector3.new(halfX + WALL_THICK / 2, trimY, 0))
+	trim(Vector3.new(WALL_THICK, trimH, mapDef.Size.Z), Vector3.new(-halfX - WALL_THICK / 2, trimY, 0))
+
+	-- obstáculos (base no chão), com aresta neon em cima
 	for i, o in ipairs(mapDef.Obstacles) do
-		makePart("Obstacle" .. i, o.Size,
+		local block = makePart("Obstacle" .. i, o.Size,
 			o.Pos + Vector3.new(0, o.Size.Y / 2, 0),
-			mapDef.ObstacleColor, Enum.Material.Brick, model)
+			mapDef.ObstacleColor, Enum.Material.Concrete, model)
+		block.Reflectance = 0.03
+		makePart("ObstacleTop" .. i, Vector3.new(o.Size.X, 0.4, o.Size.Z),
+			o.Pos + Vector3.new(0, o.Size.Y + 0.2, 0),
+			accent, Enum.Material.Neon, model)
+	end
+
+	-- pads de nascimento iluminados
+	for i, sp in ipairs(mapDef.SpawnPoints) do
+		local pad = makePart("SpawnPad" .. i, Vector3.new(0.4, 6, 6),
+			Vector3.new(sp.X, 0.25, sp.Z), accent, Enum.Material.Neon, model)
+		pad.Shape = Enum.PartType.Cylinder
+		pad.CFrame = CFrame.new(sp.X, 0.25, sp.Z) * CFrame.Angles(0, 0, math.rad(90))
+		pad.Transparency = 0.25
 	end
 
 	model.Parent = workspace
