@@ -1,0 +1,2369 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><Item class="Workspace" referent="RBX18"><Properties><bool name="FilteringEnabled">true</bool></Properties></Item><Item class="ReplicatedStorage" referent="RBX6"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX5"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX1"><Properties><string name="Name">GameConfig</string><ProtectedString name="Source"><![CDATA[--[[
+	GameConfig (ModuleScript)
+	Configurações gerais do jogo. Mexa aqui pra ajustar o balanceamento.
+	Local no Studio: ReplicatedStorage > Shared > GameConfig
+]]
+
+local GameConfig = {
+	-- ====== PARTIDA ======
+	MinPlayersToStart = 1,        -- jogadores necessários pra começar (1 = bom pra testar sozinho)
+	LobbyCountdown = 10,          -- segundos de contagem regressiva no lobby
+	MatchDurationSeconds = 150,   -- duração máxima da partida
+	KillsToWin = 12,              -- kills pra ganhar antes do tempo acabar
+	RespawnDelay = 3,             -- tempo pra reviver após morrer (durante a partida)
+	SpawnProtection = 2,          -- segundos de escudo ao nascer
+
+	-- ====== ECONOMIA ======
+	StartingCoins = 0,            -- moedas iniciais de um jogador novo
+	CoinsPerKill = 12,            -- moedas por abate
+	CoinsPerMatch = 15,           -- moedas de participação (ganha quem jogou a partida)
+	CoinsPerWin = 60,             -- bônus extra pro vencedor
+
+	-- ====== BRAWLERS INICIAIS ======
+	StartingBrawlers = { "Shelly" }, -- brawlers que todo mundo já começa tendo
+}
+
+return GameConfig
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX2"><Properties><string name="Name">Brawlers</string><ProtectedString name="Source"><![CDATA[--[[
+	Brawlers (ModuleScript)
+	Lista de todos os personagens jogáveis e seus atributos.
+	Para criar um brawler novo, copie um bloco e mude os valores.
+
+	Campos:
+	  DisplayName : nome que aparece na tela
+	  Price       : preço em moedas (0 = grátis)
+	  Health      : vida máxima
+	  WalkSpeed   : velocidade de andar
+	  Damage      : dano por tiro
+	  Range       : alcance do tiro (studs)
+	  Spread      : abertura do tiro em graus (pequeno = preciso, grande = "espingarda")
+	  ReloadTime  : tempo entre tiros (segundos)
+	  Color       : cor do corpo do personagem
+	  Special     : habilidade especial { Damage, Range, Spread, Cooldown }
+
+	Local no Studio: ReplicatedStorage > Shared > Brawlers
+]]
+
+local Brawlers = {
+
+	Shelly = {
+		DisplayName = "Shelly",
+		Price = 0,
+		Health = 100,
+		WalkSpeed = 16,
+		Damage = 16,
+		Range = 35,
+		Spread = 24,
+		ReloadTime = 0.7,
+		Color = Color3.fromRGB(255, 170, 60),
+		Special = { Damage = 30, Range = 42, Spread = 38, Cooldown = 8 },
+		-- aparência: Hat = "Cap" | "Box" | "Helmet" | "Cone"
+		Skin = { Hat = "Cap", HatColor = Color3.fromRGB(180, 110, 30), Scale = 1.0 },
+	},
+
+	Colt = {
+		DisplayName = "Colt",
+		Price = 200,
+		Health = 78,
+		WalkSpeed = 16,
+		Damage = 13,
+		Range = 58,
+		Spread = 5,
+		ReloadTime = 0.3,
+		Color = Color3.fromRGB(70, 130, 255),
+		Special = { Damage = 22, Range = 65, Spread = 6, Cooldown = 7 },
+		Skin = { Hat = "Box", HatColor = Color3.fromRGB(30, 60, 160), Scale = 0.98 },
+	},
+
+	Bull = {
+		DisplayName = "Bull",
+		Price = 300,
+		Health = 165,
+		WalkSpeed = 17,
+		Damage = 24,
+		Range = 24,
+		Spread = 32,
+		ReloadTime = 0.85,
+		Color = Color3.fromRGB(120, 90, 60),
+		Special = { Damage = 36, Range = 30, Spread = 40, Cooldown = 9 },
+		Skin = { Hat = "Helmet", HatColor = Color3.fromRGB(70, 50, 30), Scale = 1.2 },
+	},
+
+	Piper = {
+		DisplayName = "Piper",
+		Price = 500,
+		Health = 68,
+		WalkSpeed = 16,
+		Damage = 38,
+		Range = 82,
+		Spread = 2,
+		ReloadTime = 1.2,
+		Color = Color3.fromRGB(230, 80, 160),
+		Special = { Damage = 50, Range = 70, Spread = 3, Cooldown = 10 },
+		Skin = { Hat = "Cone", HatColor = Color3.fromRGB(170, 40, 110), Scale = 0.9 },
+	},
+}
+
+return Brawlers
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX3"><Properties><string name="Name">Maps</string><ProtectedString name="Source"><![CDATA[--[[
+	Maps (ModuleScript)
+	Definição dos 3 mapas. Os mapas são CONSTRUÍDOS POR CÓDIGO (não precisa
+	montar nada à mão no Studio). Cada mapa tem chão, paredes em volta,
+	obstáculos pra se proteger e pontos de nascimento.
+
+	Tudo é centrado na posição (0,0,0). O topo do chão fica em y = 0.
+
+	Campos:
+	  Name          : nome do mapa
+	  Size          : tamanho do chão (largura, _, comprimento)
+	  FloorColor    : cor do chão
+	  ObstacleColor : cor dos obstáculos
+	  Material      : material do chão
+	  Obstacles     : lista de blocos { Pos = Vector3, Size = Vector3 }  (Pos.Y é a base, no nível do chão)
+	  SpawnPoints   : lista de Vector3 onde os jogadores nascem (y ~ 4)
+
+	Local no Studio: ReplicatedStorage > Shared > Maps
+]]
+
+local Maps = {
+
+	-- ===================== MAPA 1 =====================
+	{
+		Name = "Arena Clássica",
+		Size = Vector3.new(100, 1, 100),
+		FloorColor = Color3.fromRGB(95, 160, 90),
+		ObstacleColor = Color3.fromRGB(120, 85, 60),
+		Material = Enum.Material.Grass,
+		Obstacles = {
+			{ Pos = Vector3.new(0, 0, 0),    Size = Vector3.new(10, 10, 10) },
+			{ Pos = Vector3.new(25, 0, 25),  Size = Vector3.new(8, 8, 8) },
+			{ Pos = Vector3.new(-25, 0, 25), Size = Vector3.new(8, 8, 8) },
+			{ Pos = Vector3.new(25, 0, -25), Size = Vector3.new(8, 8, 8) },
+			{ Pos = Vector3.new(-25, 0, -25),Size = Vector3.new(8, 8, 8) },
+			{ Pos = Vector3.new(0, 0, 35),   Size = Vector3.new(20, 6, 4) },
+			{ Pos = Vector3.new(0, 0, -35),  Size = Vector3.new(20, 6, 4) },
+		},
+		SpawnPoints = {
+			Vector3.new(-40, 4, -40), Vector3.new(40, 4, 40),
+			Vector3.new(-40, 4, 40),  Vector3.new(40, 4, -40),
+			Vector3.new(0, 4, -42),   Vector3.new(0, 4, 42),
+			Vector3.new(-42, 4, 0),   Vector3.new(42, 4, 0),
+		},
+	},
+
+	-- ===================== MAPA 2 =====================
+	{
+		Name = "Labirinto",
+		Size = Vector3.new(120, 1, 120),
+		FloorColor = Color3.fromRGB(110, 110, 125),
+		ObstacleColor = Color3.fromRGB(60, 60, 75),
+		Material = Enum.Material.Slate,
+		Obstacles = {
+			{ Pos = Vector3.new(-30, 0, -30), Size = Vector3.new(6, 9, 28) },
+			{ Pos = Vector3.new(30, 0, 30),   Size = Vector3.new(6, 9, 28) },
+			{ Pos = Vector3.new(-30, 0, 30),  Size = Vector3.new(28, 9, 6) },
+			{ Pos = Vector3.new(30, 0, -30),  Size = Vector3.new(28, 9, 6) },
+			{ Pos = Vector3.new(0, 0, 0),     Size = Vector3.new(14, 9, 14) },
+			{ Pos = Vector3.new(0, 0, 45),    Size = Vector3.new(6, 9, 22) },
+			{ Pos = Vector3.new(0, 0, -45),   Size = Vector3.new(6, 9, 22) },
+		},
+		SpawnPoints = {
+			Vector3.new(-50, 4, -50), Vector3.new(50, 4, 50),
+			Vector3.new(-50, 4, 50),  Vector3.new(50, 4, -50),
+			Vector3.new(0, 4, -52),   Vector3.new(0, 4, 52),
+			Vector3.new(-52, 4, 0),   Vector3.new(52, 4, 0),
+		},
+	},
+
+	-- ===================== MAPA 3 =====================
+	{
+		Name = "Deserto",
+		Size = Vector3.new(90, 1, 90),
+		FloorColor = Color3.fromRGB(225, 195, 130),
+		ObstacleColor = Color3.fromRGB(170, 130, 80),
+		Material = Enum.Material.Sand,
+		Obstacles = {
+			{ Pos = Vector3.new(0, 0, 0),     Size = Vector3.new(12, 7, 12) },
+			{ Pos = Vector3.new(20, 0, 0),    Size = Vector3.new(5, 5, 5) },
+			{ Pos = Vector3.new(-20, 0, 0),   Size = Vector3.new(5, 5, 5) },
+			{ Pos = Vector3.new(0, 0, 20),    Size = Vector3.new(5, 5, 5) },
+			{ Pos = Vector3.new(0, 0, -20),   Size = Vector3.new(5, 5, 5) },
+			{ Pos = Vector3.new(28, 0, 28),   Size = Vector3.new(7, 6, 7) },
+			{ Pos = Vector3.new(-28, 0, -28), Size = Vector3.new(7, 6, 7) },
+		},
+		SpawnPoints = {
+			Vector3.new(-35, 4, -35), Vector3.new(35, 4, 35),
+			Vector3.new(-35, 4, 35),  Vector3.new(35, 4, -35),
+			Vector3.new(0, 4, -38),   Vector3.new(0, 4, 38),
+			Vector3.new(-38, 4, 0),   Vector3.new(38, 4, 0),
+		},
+	},
+}
+
+return Maps
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX4"><Properties><string name="Name">Net</string><ProtectedString name="Source"><![CDATA[--[[
+	Net (ModuleScript)
+	Pequeno ajudante pra criar/pegar RemoteEvents sem dor de cabeça.
+	No servidor ele CRIA o remote; no cliente ele ESPERA o remote existir.
+	Assim você não precisa criar os RemoteEvents manualmente no Studio.
+
+	Uso:
+	  local Net = require(ReplicatedStorage.Shared.Net)
+	  local attack = Net.Event("Attack")
+
+	Local no Studio: ReplicatedStorage > Shared > Net
+]]
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Net = {}
+local FOLDER_NAME = "Remotes"
+
+local function getFolder()
+	local folder = ReplicatedStorage:FindFirstChild(FOLDER_NAME)
+	if folder then
+		return folder
+	end
+	if RunService:IsServer() then
+		folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+		return folder
+	end
+	return ReplicatedStorage:WaitForChild(FOLDER_NAME)
+end
+
+function Net.Event(name)
+	local folder = getFolder()
+	local ev = folder:FindFirstChild(name)
+	if ev then
+		return ev
+	end
+	if RunService:IsServer() then
+		ev = Instance.new("RemoteEvent")
+		ev.Name = name
+		ev.Parent = folder
+		return ev
+	end
+	return folder:WaitForChild(name)
+end
+
+return Net
+]]></ProtectedString></Properties></Item></Item></Item><Item class="ServerScriptService" referent="RBX14"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Script" referent="RBX7"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[--[[
+	Main (Script — roda no servidor)
+	Inicializa todos os sistemas, configura a iluminação/atmosfera e conecta
+	entrada/saída de jogadores.
+
+	Local no Studio: ServerScriptService > Server > Main
+]]
+
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+
+-- nós controlamos quando o personagem nasce (não deixa o Roblox nascer sozinho)
+Players.CharacterAutoLoads = false
+
+-- ===================================================================
+-- VISUAL: iluminação + atmosfera bonitas (tira o cinza padrão)
+-- ===================================================================
+local function setupScene()
+	Lighting.ClockTime = 14.5
+	Lighting.Brightness = 2.6
+	Lighting.Ambient = Color3.fromRGB(70, 70, 85)
+	Lighting.OutdoorAmbient = Color3.fromRGB(125, 130, 150)
+	Lighting.EnvironmentDiffuseScale = 0.45
+	Lighting.EnvironmentSpecularScale = 0.45
+	Lighting.GeographicLatitude = 25
+	Lighting.ShadowSoftness = 0.4
+	Lighting.FogEnd = 100000 -- remove a névoa cinza pesada
+
+	for _, name in ipairs({ "BA_Atmosphere", "BA_Bloom", "BA_Color", "BA_Sky", "BA_Sun" }) do
+		local old = Lighting:FindFirstChild(name)
+		if old then
+			old:Destroy()
+		end
+	end
+
+	local atmo = Instance.new("Atmosphere")
+	atmo.Name = "BA_Atmosphere"
+	atmo.Density = 0.32
+	atmo.Offset = 0.2
+	atmo.Color = Color3.fromRGB(199, 215, 230)
+	atmo.Decay = Color3.fromRGB(106, 112, 125)
+	atmo.Glare = 0.15
+	atmo.Haze = 1.4
+	atmo.Parent = Lighting
+
+	local bloom = Instance.new("BloomEffect")
+	bloom.Name = "BA_Bloom"
+	bloom.Intensity = 0.7
+	bloom.Size = 24
+	bloom.Threshold = 1.1
+	bloom.Parent = Lighting
+
+	local cc = Instance.new("ColorCorrectionEffect")
+	cc.Name = "BA_Color"
+	cc.Saturation = 0.18
+	cc.Contrast = 0.1
+	cc.Brightness = 0.02
+	cc.Parent = Lighting
+
+	local sun = Instance.new("SunRaysEffect")
+	sun.Name = "BA_Sun"
+	sun.Intensity = 0.12
+	sun.Spread = 0.6
+	sun.Parent = Lighting
+
+	local sky = Instance.new("Sky")
+	sky.Name = "BA_Sky"
+	sky.Parent = Lighting
+
+	-- sombras ligadas
+	Lighting.GlobalShadows = true
+
+	-- nuvens no céu (fundo no lugar do céu vazio)
+	local terrain = workspace:FindFirstChildOfClass("Terrain")
+	if terrain then
+		local clouds = terrain:FindFirstChildOfClass("Clouds")
+		if not clouds then
+			clouds = Instance.new("Clouds")
+			clouds.Parent = terrain
+		end
+		clouds.Cover = 0.6
+		clouds.Density = 0.55
+		clouds.Color = Color3.fromRGB(255, 255, 255)
+	end
+end
+
+setupScene()
+
+-- ===================================================================
+-- SISTEMAS
+-- ===================================================================
+local Server = script.Parent
+local DataManager   = require(Server.DataManager)
+local Spawner       = require(Server.Spawner)
+local CombatManager = require(Server.CombatManager)
+local ShopManager   = require(Server.ShopManager)
+local MapGenerator  = require(Server.MapGenerator)
+local MatchManager  = require(Server.MatchManager)
+
+CombatManager.Init()
+ShopManager.Init(DataManager)
+MatchManager.Init({
+	DataManager = DataManager,
+	Spawner = Spawner,
+	CombatManager = CombatManager,
+	MapGenerator = MapGenerator,
+})
+
+-- ===================================================================
+-- JOGADORES
+-- ===================================================================
+local function onPlayerAdded(player)
+	DataManager.Load(player)
+	MatchManager.OnPlayerAdded(player)
+end
+
+-- cobre quem entrou ANTES do script ligar (importante no teste do Studio)
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(onPlayerAdded, player)
+end
+Players.PlayerAdded:Connect(onPlayerAdded)
+
+Players.PlayerRemoving:Connect(function(player)
+	DataManager.Save(player)
+	DataManager.Remove(player)
+end)
+
+game:BindToClose(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		DataManager.Save(player)
+	end
+	task.wait(1)
+end)
+
+print("[BrawlArena] Servidor iniciado ✔")
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX8"><Properties><string name="Name">DataManager</string><ProtectedString name="Source"><![CDATA[--[[
+	DataManager (ModuleScript)
+	Guarda os dados de cada jogador: moedas, brawlers desbloqueados, brawler
+	selecionado, kills e vitórias. Salva com DataStore.
+
+	IMPORTANTE: o DataStore só funciona em jogos PUBLICADOS com
+	"Enable Studio Access to API Services" ligado (Game Settings > Security).
+	Se estiver desligado, o jogo continua funcionando, só não salva entre
+	sessões (usa valores padrão). Está tudo dentro de pcall, então não quebra.
+
+	Local no Studio: ServerScriptService > Server > DataManager
+]]
+
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.GameConfig)
+local Net = require(Shared.Net)
+
+local DataManager = {}
+
+-- GetDataStore pode dar erro em jogos não publicados / sem API Services.
+-- Protegemos com pcall: se falhar, o jogo roda normalmente, só não salva.
+local store
+do
+	local ok, result = pcall(function()
+		return DataStoreService:GetDataStore("BrawlArena_v1")
+	end)
+	if ok then
+		store = result
+	else
+		warn("[DataManager] DataStore indisponível — rodando sem salvar progresso. (Publique o jogo e ligue API Services pra salvar.)")
+	end
+end
+
+local cache = {}                  -- [player] = data
+local syncEvent = Net.Event("Sync")
+
+local function defaultData()
+	return {
+		Coins = GameConfig.StartingCoins,
+		Owned = table.clone(GameConfig.StartingBrawlers),
+		Selected = GameConfig.StartingBrawlers[1],
+		Kills = 0,
+		Wins = 0,
+	}
+end
+
+-- Garante que dados antigos tenham todos os campos novos
+local function reconcile(data)
+	local base = defaultData()
+	for key, value in pairs(base) do
+		if data[key] == nil then
+			data[key] = value
+		end
+	end
+	-- garante que o brawler inicial sempre esteja desbloqueado
+	for _, name in ipairs(GameConfig.StartingBrawlers) do
+		if not table.find(data.Owned, name) then
+			table.insert(data.Owned, name)
+		end
+	end
+	return data
+end
+
+function DataManager.Load(player)
+	local data
+	if store then
+		local ok, result = pcall(function()
+			return store:GetAsync("p_" .. player.UserId)
+		end)
+		if ok and result then
+			data = reconcile(result)
+		elseif not ok then
+			warn("[DataManager] Falha ao carregar (usando padrão):", result)
+		end
+	end
+	if not data then
+		data = defaultData()
+	end
+	cache[player] = data
+	DataManager.Sync(player)
+	return data
+end
+
+function DataManager.Save(player)
+	local data = cache[player]
+	if not data or not store then
+		return
+	end
+	local ok, err = pcall(function()
+		store:SetAsync("p_" .. player.UserId, data)
+	end)
+	if not ok then
+		warn("[DataManager] Falha ao salvar:", err)
+	end
+end
+
+function DataManager.Remove(player)
+	cache[player] = nil
+end
+
+function DataManager.Get(player)
+	return cache[player]
+end
+
+-- Manda os dados pro cliente atualizar a interface
+function DataManager.Sync(player)
+	local data = cache[player]
+	if data then
+		syncEvent:FireClient(player, {
+			Coins = data.Coins,
+			Owned = data.Owned,
+			Selected = data.Selected,
+			Kills = data.Kills,
+			Wins = data.Wins,
+		})
+	end
+end
+
+function DataManager.AddCoins(player, amount)
+	local data = cache[player]
+	if data then
+		data.Coins += amount
+		DataManager.Sync(player)
+	end
+end
+
+function DataManager.IncrementKills(player)
+	local data = cache[player]
+	if data then
+		data.Kills += 1
+		DataManager.Sync(player)
+	end
+end
+
+function DataManager.IncrementWins(player)
+	local data = cache[player]
+	if data then
+		data.Wins += 1
+		DataManager.Sync(player)
+	end
+end
+
+return DataManager
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX9"><Properties><string name="Name">Spawner</string><ProtectedString name="Source"><![CDATA[--[[
+	Spawner (ModuleScript)
+	Nasce o personagem com o brawler escolhido (vida, velocidade, cor),
+	adiciona nome + barra de vida flutuando, e um efeito ao nascer.
+
+	Local no Studio: ServerScriptService > Server > Spawner
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Brawlers = require(Shared.Brawlers)
+local GameConfig = require(Shared.GameConfig)
+
+local Spawner = {}
+
+local function applyBrawler(character, brawlerName)
+	local data = Brawlers[brawlerName] or Brawlers[GameConfig.StartingBrawlers[1]]
+	local humanoid = character:WaitForChild("Humanoid")
+
+	humanoid.MaxHealth = data.Health
+	humanoid.Health = data.Health
+	humanoid.WalkSpeed = data.WalkSpeed
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None -- esconde o nome padrão
+
+	character:SetAttribute("Brawler", brawlerName)
+
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+			part.Color = data.Color
+			part.Material = Enum.Material.SmoothPlastic
+		end
+	end
+end
+
+-- monta o "chapéu/capacete" da skin e prende na cabeça
+local HAT_PRESETS = {
+	Cap    = { Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 2.2, 2.2), Offset = 0.7,  Rotate = true },
+	Box    = { Shape = Enum.PartType.Block,    Size = Vector3.new(2.2, 1.0, 2.2), Offset = 0.9,  Rotate = false },
+	Helmet = { Shape = Enum.PartType.Ball,     Size = Vector3.new(2.4, 2.4, 2.4), Offset = 0.4,  Rotate = false },
+	Cone   = { Shape = Enum.PartType.Cylinder, Size = Vector3.new(2.2, 1.6, 1.6), Offset = 1.0,  Rotate = true },
+}
+
+local function applySkin(character, skin)
+	if not skin then
+		return
+	end
+	-- tamanho do personagem
+	if skin.Scale and skin.Scale ~= 1 then
+		pcall(function()
+			character:ScaleTo(skin.Scale)
+		end)
+	end
+	-- chapéu
+	local preset = HAT_PRESETS[skin.Hat]
+	local head = character:FindFirstChild("Head")
+	if preset and head then
+		local hat = Instance.new("Part")
+		hat.Name = "BrawlHat"
+		hat.Shape = preset.Shape
+		hat.Size = preset.Size
+		hat.Color = skin.HatColor or Color3.fromRGB(60, 60, 60)
+		hat.Material = Enum.Material.SmoothPlastic
+		hat.CanCollide = false
+		hat.Massless = true
+		local cf = head.CFrame * CFrame.new(0, head.Size.Y / 2 + preset.Offset, 0)
+		if preset.Rotate then
+			cf = cf * CFrame.Angles(0, 0, math.rad(90)) -- deita o cilindro como "boné"
+		end
+		hat.CFrame = cf
+		hat.Parent = character
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = hat
+		weld.Part1 = head
+		weld.Parent = hat
+	end
+end
+
+-- nome + barra de vida acima da cabeça
+local function addNameplate(character, player)
+	local head = character:FindFirstChild("Head")
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not head or not humanoid then
+		return
+	end
+
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "Nameplate"
+	bb.Size = UDim2.new(0, 130, 0, 40)
+	bb.StudsOffset = Vector3.new(0, 2.8, 0)
+	bb.AlwaysOnTop = true
+	bb.MaxDistance = 200
+	bb.Adornee = head
+	bb.Parent = head
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextSize = 15
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextStrokeTransparency = 0.3
+	nameLabel.Text = player.Name
+	nameLabel.Parent = bb
+
+	local barBg = Instance.new("Frame")
+	barBg.Size = UDim2.new(0.85, 0, 0.28, 0)
+	barBg.Position = UDim2.new(0.075, 0, 0.62, 0)
+	barBg.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+	barBg.BorderSizePixel = 0
+	barBg.Parent = bb
+	local c1 = Instance.new("UICorner")
+	c1.CornerRadius = UDim.new(1, 0)
+	c1.Parent = barBg
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(1, 0, 1, 0)
+	fill.BorderSizePixel = 0
+	fill.Parent = barBg
+	local c2 = Instance.new("UICorner")
+	c2.CornerRadius = UDim.new(1, 0)
+	c2.Parent = fill
+
+	local function update()
+		local ratio = humanoid.MaxHealth > 0 and math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1) or 0
+		fill.Size = UDim2.new(ratio, 0, 1, 0)
+		fill.BackgroundColor3 = Color3.fromRGB(
+			math.floor(235 * (1 - ratio)) + 20,
+			math.floor(200 * ratio) + 40,
+			70
+		)
+	end
+	update()
+	humanoid.HealthChanged:Connect(update)
+end
+
+local function addSpawnProtection(character)
+	if GameConfig.SpawnProtection <= 0 then
+		return
+	end
+	local ff = Instance.new("ForceField")
+	ff.Visible = true
+	ff.Parent = character
+	task.delay(GameConfig.SpawnProtection, function()
+		if ff and ff.Parent then
+			ff:Destroy()
+		end
+	end)
+end
+
+-- efeito visual ao nascer (anel que sobe)
+local function spawnEffect(character, color)
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = color
+	ring.Size = Vector3.new(0.4, 7, 7)
+	ring.CFrame = CFrame.new(root.Position - Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = workspace
+	task.spawn(function()
+		for i = 1, 12 do
+			ring.CFrame = ring.CFrame + Vector3.new(0, 0.4, 0)
+			ring.Transparency = i / 12
+			task.wait(0.03)
+		end
+		ring:Destroy()
+	end)
+end
+
+function Spawner.Spawn(player, brawlerName, cframe, onDied)
+	player:LoadCharacter()
+	local character = player.Character or player.CharacterAdded:Wait()
+	local humanoid = character:WaitForChild("Humanoid")
+
+	applyBrawler(character, brawlerName)
+	applySkin(character, (Brawlers[brawlerName] or {}).Skin)
+	character:PivotTo(cframe)
+	addNameplate(character, player)
+	addSpawnProtection(character)
+
+	local data = Brawlers[brawlerName] or Brawlers[GameConfig.StartingBrawlers[1]]
+	spawnEffect(character, data.Color)
+
+	if onDied then
+		humanoid.Died:Once(function()
+			onDied(player, character)
+		end)
+	end
+
+	return character
+end
+
+return Spawner
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX10"><Properties><string name="Name">CombatManager</string><ProtectedString name="Source"><![CDATA[--[[
+	CombatManager (ModuleScript)
+	Combate autoritativo. Acerta tanto JOGADORES quanto BOTS (modelos com
+	Humanoid dentro da pasta workspace.Enemies). Mostra números de dano.
+
+	Local no Studio: ServerScriptService > Server > CombatManager
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Brawlers = require(Shared.Brawlers)
+local Net = require(Shared.Net)
+
+local CombatManager = {}
+
+local nextAttack = {}
+local nextSpecial = {}
+local lastAttacker = {} -- [character/model vítima] = player atacante
+
+local attackEvent = Net.Event("Attack")
+local specialEvent = Net.Event("Special")
+local fxEvent = Net.Event("AttackFX")
+local hitEvent = Net.Event("Hit")
+
+local function getAliveCharacter(player)
+	local char = player.Character
+	if not char then
+		return nil
+	end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local root = char:FindFirstChild("HumanoidRootPart")
+	if hum and root and hum.Health > 0 then
+		return char, hum, root
+	end
+	return nil
+end
+
+-- junta todos os alvos válidos (jogadores + bots), menos o atacante
+local function gatherTargets(attackerPlayer, attackerChar)
+	local targets = {}
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= attackerPlayer then
+			local c, h, r = getAliveCharacter(other)
+			if c then
+				table.insert(targets, { char = c, hum = h, root = r })
+			end
+		end
+	end
+	local folder = workspace:FindFirstChild("Enemies")
+	if folder then
+		for _, m in ipairs(folder:GetChildren()) do
+			local h = m:FindFirstChildOfClass("Humanoid")
+			local r = m:FindFirstChild("HumanoidRootPart")
+			if h and r and h.Health > 0 and m ~= attackerChar then
+				table.insert(targets, { char = m, hum = h, root = r })
+			end
+		end
+	end
+	return targets
+end
+
+local function hasLineOfSight(origin, attackerChar, targetChar, targetPos)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { attackerChar, targetChar }
+	local result = workspace:Raycast(origin, (targetPos - origin), params)
+	return result == nil
+end
+
+local function fireCone(player, direction, damage, range, spreadDeg)
+	local attackerChar, _, attackerRoot = getAliveCharacter(player)
+	if not attackerChar then
+		return
+	end
+
+	local origin = attackerRoot.Position
+	direction = Vector3.new(direction.X, 0, direction.Z)
+	if direction.Magnitude < 0.01 then
+		return
+	end
+	direction = direction.Unit
+
+	local brawlerName = attackerChar:GetAttribute("Brawler")
+	local color = Brawlers[brawlerName] and Brawlers[brawlerName].Color or Color3.new(1, 1, 1)
+	local spreadRad = math.rad(spreadDeg)
+
+	for _, t in ipairs(gatherTargets(player, attackerChar)) do
+		if not t.char:FindFirstChildOfClass("ForceField") then
+			local flat = Vector3.new(t.root.Position.X - origin.X, 0, t.root.Position.Z - origin.Z)
+			local dist = flat.Magnitude
+			if dist <= range and dist > 0.01 then
+				local angle = math.acos(math.clamp(direction:Dot(flat.Unit), -1, 1))
+				if angle <= spreadRad then
+					if hasLineOfSight(origin, attackerChar, t.char, t.root.Position) then
+						lastAttacker[t.char] = player
+						t.hum:TakeDamage(damage)
+						hitEvent:FireAllClients(t.root.Position, damage, color)
+					end
+				end
+			end
+		end
+	end
+
+	fxEvent:FireAllClients(origin, direction, range, color)
+end
+
+function CombatManager.GetLastAttacker(character)
+	return lastAttacker[character]
+end
+
+function CombatManager.ClearLastAttacker(character)
+	lastAttacker[character] = nil
+end
+
+function CombatManager.Init()
+	attackEvent.OnServerEvent:Connect(function(player, direction)
+		if typeof(direction) ~= "Vector3" then
+			return
+		end
+		local char = getAliveCharacter(player)
+		if not char then
+			return
+		end
+		local b = Brawlers[char:GetAttribute("Brawler")]
+		if not b then
+			return
+		end
+		local now = os.clock()
+		if (nextAttack[player] or 0) > now then
+			return
+		end
+		nextAttack[player] = now + b.ReloadTime
+		fireCone(player, direction, b.Damage, b.Range, b.Spread)
+	end)
+
+	specialEvent.OnServerEvent:Connect(function(player, direction)
+		if typeof(direction) ~= "Vector3" then
+			return
+		end
+		local char = getAliveCharacter(player)
+		if not char then
+			return
+		end
+		local b = Brawlers[char:GetAttribute("Brawler")]
+		if not b or not b.Special then
+			return
+		end
+		local now = os.clock()
+		if (nextSpecial[player] or 0) > now then
+			return
+		end
+		nextSpecial[player] = now + b.Special.Cooldown
+		fireCone(player, direction, b.Special.Damage, b.Special.Range, b.Special.Spread)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		nextAttack[player] = nil
+		nextSpecial[player] = nil
+		for victim, attacker in pairs(lastAttacker) do
+			if attacker == player then
+				lastAttacker[victim] = nil
+			end
+		end
+	end)
+end
+
+return CombatManager
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX11"><Properties><string name="Name">ShopManager</string><ProtectedString name="Source"><![CDATA[--[[
+	ShopManager (ModuleScript)
+	Cuida da loja: comprar brawlers e selecionar qual brawler usar.
+
+	Local no Studio: ServerScriptService > Server > ShopManager
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Brawlers = require(Shared.Brawlers)
+local Net = require(Shared.Net)
+
+local ShopManager = {}
+
+local DataManager  -- injetado no Init pra evitar dependência circular
+
+local buyEvent = Net.Event("BuyBrawler")
+local selectEvent = Net.Event("SelectBrawler")
+local notifyEvent = Net.Event("Notify")
+
+local function notify(player, message)
+	notifyEvent:FireClient(player, message)
+end
+
+function ShopManager.Init(dataManager)
+	DataManager = dataManager
+
+	buyEvent.OnServerEvent:Connect(function(player, brawlerName)
+		local b = Brawlers[brawlerName]
+		local data = DataManager.Get(player)
+		if not b or not data then
+			return
+		end
+		if table.find(data.Owned, brawlerName) then
+			notify(player, "Você já tem o " .. b.DisplayName .. "!")
+			return
+		end
+		if data.Coins < b.Price then
+			notify(player, "Moedas insuficientes (" .. b.Price .. ").")
+			return
+		end
+		data.Coins -= b.Price
+		table.insert(data.Owned, brawlerName)
+		data.Selected = brawlerName
+		DataManager.Sync(player)
+		notify(player, "Desbloqueou o " .. b.DisplayName .. "! 🎉")
+	end)
+
+	selectEvent.OnServerEvent:Connect(function(player, brawlerName)
+		local data = DataManager.Get(player)
+		if not data or not Brawlers[brawlerName] then
+			return
+		end
+		if not table.find(data.Owned, brawlerName) then
+			notify(player, "Você ainda não tem esse brawler.")
+			return
+		end
+		data.Selected = brawlerName
+		DataManager.Sync(player)
+		notify(player, "Selecionado: " .. Brawlers[brawlerName].DisplayName)
+	end)
+end
+
+return ShopManager
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX12"><Properties><string name="Name">MapGenerator</string><ProtectedString name="Source"><![CDATA[--[[
+	MapGenerator (ModuleScript)
+	Constrói o mapa em 3D a partir de Shared/Maps, com acabamento bonito:
+	borda neon, paredes de vidro, pads de nascimento iluminados e obstáculos.
+
+	Local no Studio: ServerScriptService > Server > MapGenerator
+]]
+
+local MapGenerator = {}
+
+local WALL_HEIGHT = 18
+local WALL_THICK = 4
+
+local function makePart(name, size, position, color, material, parent)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Anchored = true
+	p.Size = size
+	p.Position = position
+	p.Color = color
+	p.Material = material
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+-- clareia uma cor pra usar como "neon de destaque"
+local function accentOf(color)
+	return Color3.new(
+		math.min(1, color.R * 0.5 + 0.5),
+		math.min(1, color.G * 0.5 + 0.55),
+		math.min(1, color.B * 0.5 + 0.6)
+	)
+end
+
+function MapGenerator.Build(mapDef)
+	local model = Instance.new("Model")
+	model.Name = "Map_" .. mapDef.Name
+	local accent = accentOf(mapDef.FloorColor)
+
+	-- chão (topo em y = 0)
+	local floor = makePart("Floor", mapDef.Size, Vector3.new(0, -mapDef.Size.Y / 2, 0),
+		mapDef.FloorColor, mapDef.Material, model)
+	floor.Reflectance = 0.02
+
+	local halfX = mapDef.Size.X / 2
+	local halfZ = mapDef.Size.Z / 2
+
+	-- paredes de vidro escuro
+	local function wall(name, size, pos)
+		local w = makePart(name, size, pos, Color3.fromRGB(40, 44, 56), Enum.Material.Glass, model)
+		w.Transparency = 0.35
+		w.Reflectance = 0.15
+		return w
+	end
+	wall("WallN", Vector3.new(mapDef.Size.X + WALL_THICK * 2, WALL_HEIGHT, WALL_THICK),
+		Vector3.new(0, WALL_HEIGHT / 2, halfZ + WALL_THICK / 2))
+	wall("WallS", Vector3.new(mapDef.Size.X + WALL_THICK * 2, WALL_HEIGHT, WALL_THICK),
+		Vector3.new(0, WALL_HEIGHT / 2, -halfZ - WALL_THICK / 2))
+	wall("WallE", Vector3.new(WALL_THICK, WALL_HEIGHT, mapDef.Size.Z),
+		Vector3.new(halfX + WALL_THICK / 2, WALL_HEIGHT / 2, 0))
+	wall("WallW", Vector3.new(WALL_THICK, WALL_HEIGHT, mapDef.Size.Z),
+		Vector3.new(-halfX - WALL_THICK / 2, WALL_HEIGHT / 2, 0))
+
+	-- trilho neon no topo das bordas
+	local trimH = 0.6
+	local trimY = WALL_HEIGHT + trimH / 2
+	local function trim(size, pos)
+		local t = makePart("Trim", size, pos, accent, Enum.Material.Neon, model)
+		return t
+	end
+	trim(Vector3.new(mapDef.Size.X + WALL_THICK * 2, trimH, WALL_THICK), Vector3.new(0, trimY, halfZ + WALL_THICK / 2))
+	trim(Vector3.new(mapDef.Size.X + WALL_THICK * 2, trimH, WALL_THICK), Vector3.new(0, trimY, -halfZ - WALL_THICK / 2))
+	trim(Vector3.new(WALL_THICK, trimH, mapDef.Size.Z), Vector3.new(halfX + WALL_THICK / 2, trimY, 0))
+	trim(Vector3.new(WALL_THICK, trimH, mapDef.Size.Z), Vector3.new(-halfX - WALL_THICK / 2, trimY, 0))
+
+	-- obstáculos (base no chão), com aresta neon em cima
+	for i, o in ipairs(mapDef.Obstacles) do
+		local block = makePart("Obstacle" .. i, o.Size,
+			o.Pos + Vector3.new(0, o.Size.Y / 2, 0),
+			mapDef.ObstacleColor, Enum.Material.Concrete, model)
+		block.Reflectance = 0.03
+		makePart("ObstacleTop" .. i, Vector3.new(o.Size.X, 0.4, o.Size.Z),
+			o.Pos + Vector3.new(0, o.Size.Y + 0.2, 0),
+			accent, Enum.Material.Neon, model)
+	end
+
+	-- pads de nascimento iluminados
+	for i, sp in ipairs(mapDef.SpawnPoints) do
+		local pad = makePart("SpawnPad" .. i, Vector3.new(0.4, 6, 6),
+			Vector3.new(sp.X, 0.25, sp.Z), accent, Enum.Material.Neon, model)
+		pad.Shape = Enum.PartType.Cylinder
+		pad.CFrame = CFrame.new(sp.X, 0.25, sp.Z) * CFrame.Angles(0, 0, math.rad(90))
+		pad.Transparency = 0.25
+	end
+
+	-- ===== DECORAÇÃO =====
+	-- postes de luz nos 4 cantos (com luz de verdade)
+	local cx, cz = halfX - 8, halfZ - 8
+	for _, corner in ipairs({
+		Vector3.new(cx, 0, cz), Vector3.new(-cx, 0, cz),
+		Vector3.new(cx, 0, -cz), Vector3.new(-cx, 0, -cz),
+	}) do
+		local pole = makePart("LampPole", Vector3.new(0.6, 11, 0.6),
+			corner + Vector3.new(0, 5.5, 0), Color3.fromRGB(40, 40, 48), Enum.Material.Metal, model)
+		local bulb = makePart("LampBulb", Vector3.new(1.6, 1.6, 1.6),
+			corner + Vector3.new(0, 11, 0), accent, Enum.Material.Neon, model)
+		bulb.Shape = Enum.PartType.Ball
+		local light = Instance.new("PointLight")
+		light.Color = accent
+		light.Brightness = 3
+		light.Range = 26
+		light.Parent = bulb
+		pole.CastShadow = true
+	end
+
+	-- barris (cilindros de madeira) e caixotes (blocos) espalhados pra dar cobertura
+	local props = {
+		{ kind = "barrel", pos = Vector3.new(15, 0, 0) },
+		{ kind = "barrel", pos = Vector3.new(-15, 0, 0) },
+		{ kind = "crate",  pos = Vector3.new(0, 0, 15) },
+		{ kind = "crate",  pos = Vector3.new(0, 0, -15) },
+		{ kind = "crate",  pos = Vector3.new(18, 0, 18) },
+		{ kind = "barrel", pos = Vector3.new(-18, 0, -18) },
+	}
+	for i, p in ipairs(props) do
+		if p.kind == "barrel" then
+			local b = makePart("Barrel" .. i, Vector3.new(3, 3.4, 3),
+				p.pos + Vector3.new(0, 1.7, 0), Color3.fromRGB(120, 80, 45), Enum.Material.WoodPlanks, model)
+			b.Shape = Enum.PartType.Cylinder
+			b.CFrame = CFrame.new(p.pos + Vector3.new(0, 1.7, 0)) * CFrame.Angles(0, 0, math.rad(90))
+			b.CastShadow = true
+		else
+			local c = makePart("Crate" .. i, Vector3.new(3.2, 3.2, 3.2),
+				p.pos + Vector3.new(0, 1.6, 0), Color3.fromRGB(150, 110, 65), Enum.Material.WoodPlanks, model)
+			c.CastShadow = true
+		end
+	end
+
+	model.Parent = workspace
+	return model
+end
+
+return MapGenerator
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX13"><Properties><string name="Name">MatchManager</string><ProtectedString name="Source"><![CDATA[--[[
+	MatchManager (ModuleScript)
+	Cérebro do jogo: LOBBY -> CONTAGEM -> PARTIDA -> FIM -> repete.
+	Também cria BOTS inimigos no meio do mapa (pra jogar/treinar sozinho):
+	eles têm vida, dão moeda quando abatidos e renascem.
+
+	Local no Studio: ServerScriptService > Server > MatchManager
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.GameConfig)
+local Maps = require(Shared.Maps)
+local Net = require(Shared.Net)
+
+local MatchManager = {}
+
+local DataManager
+local Spawner
+local CombatManager
+local MapGenerator
+
+local matchEvent = Net.Event("Match")
+local notifyEvent = Net.Event("Notify")
+
+local LOBBY_CENTER = Vector3.new(0, 500, 0)
+local LOBBY_SPAWN_CFRAME = CFrame.new(LOBBY_CENTER + Vector3.new(0, 4, 0))
+
+local BOT_COUNT = 3
+local BOT_HEALTH = 80
+local BOT_RESPAWN = 4
+
+local phase = "LOBBY"
+local matchActive = false
+local currentMap = nil
+local currentMapDef = nil
+local enemiesFolder = nil
+local scores = {}
+local timeLeft = 0
+
+-- ===================================================================
+-- LOBBY
+-- ===================================================================
+local function buildLobby()
+	local model = Instance.new("Model")
+	model.Name = "Lobby"
+
+	local floor = Instance.new("Part")
+	floor.Name = "LobbyFloor"
+	floor.Anchored = true
+	floor.Size = Vector3.new(60, 2, 60)
+	floor.Position = LOBBY_CENTER
+	floor.Color = Color3.fromRGB(70, 75, 95)
+	floor.Material = Enum.Material.Metal
+	floor.Parent = model
+
+	for _, off in ipairs({
+		Vector3.new(0, 0, 31), Vector3.new(0, 0, -31),
+		Vector3.new(31, 0, 0), Vector3.new(-31, 0, 0),
+	}) do
+		local wall = Instance.new("Part")
+		wall.Anchored = true
+		wall.Size = (off.X ~= 0) and Vector3.new(2, 8, 62) or Vector3.new(62, 8, 2)
+		wall.Position = LOBBY_CENTER + off + Vector3.new(0, 5, 0)
+		wall.Color = Color3.fromRGB(50, 55, 70)
+		wall.Material = Enum.Material.Metal
+		wall.Parent = model
+	end
+
+	model.Parent = workspace
+end
+
+-- ===================================================================
+-- BOTS INIMIGOS
+-- ===================================================================
+local function botHealthBar(model, humanoid)
+	local head = model:FindFirstChild("Head")
+	if not head then
+		return
+	end
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.new(0, 90, 0, 28)
+	bb.StudsOffset = Vector3.new(0, 2.4, 0)
+	bb.AlwaysOnTop = true
+	bb.Adornee = head
+	bb.Parent = head
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0.5, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 13
+	label.TextColor3 = Color3.fromRGB(255, 120, 120)
+	label.TextStrokeTransparency = 0.3
+	label.Text = "BOT"
+	label.Parent = bb
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, 0, 0.32, 0)
+	bg.Position = UDim2.new(0, 0, 0.6, 0)
+	bg.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+	bg.BorderSizePixel = 0
+	bg.Parent = bb
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(1, 0)
+	c.Parent = bg
+
+	local fill = Instance.new("Frame")
+	fill.BackgroundColor3 = Color3.fromRGB(230, 70, 70)
+	fill.BorderSizePixel = 0
+	fill.Size = UDim2.new(1, 0, 1, 0)
+	fill.Parent = bg
+	local c2 = Instance.new("UICorner")
+	c2.CornerRadius = UDim.new(1, 0)
+	c2.Parent = fill
+
+	humanoid.HealthChanged:Connect(function()
+		local r = humanoid.MaxHealth > 0 and math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1) or 0
+		fill.Size = UDim2.new(r, 0, 1, 0)
+	end)
+end
+
+local function buildBot(position)
+	local model = Instance.new("Model")
+	model.Name = "Bot"
+
+	local hrp = Instance.new("Part")
+	hrp.Name = "HumanoidRootPart"
+	hrp.Size = Vector3.new(2, 2, 1)
+	hrp.Transparency = 1
+	hrp.Anchored = true
+	hrp.CanCollide = false
+	hrp.CFrame = CFrame.new(position)
+	hrp.Parent = model
+
+	local torso = Instance.new("Part")
+	torso.Name = "Torso"
+	torso.Size = Vector3.new(2.2, 2.4, 1.2)
+	torso.Color = Color3.fromRGB(210, 60, 60)
+	torso.Material = Enum.Material.SmoothPlastic
+	torso.Anchored = true
+	torso.CanCollide = false
+	torso.CFrame = hrp.CFrame
+	torso.Parent = model
+
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Shape = Enum.PartType.Ball
+	head.Size = Vector3.new(1.5, 1.5, 1.5)
+	head.Color = Color3.fromRGB(240, 90, 90)
+	head.Material = Enum.Material.SmoothPlastic
+	head.Anchored = true
+	head.CanCollide = false
+	head.CFrame = hrp.CFrame * CFrame.new(0, 1.7, 0)
+	head.Parent = model
+
+	local humanoid = Instance.new("Humanoid")
+	humanoid.RigType = Enum.HumanoidRigType.R6
+	humanoid.RequiresNeck = false
+	humanoid.MaxHealth = BOT_HEALTH
+	humanoid.Health = BOT_HEALTH
+	humanoid.Parent = model
+
+	model.PrimaryPart = hrp
+	botHealthBar(model, humanoid)
+	return model, humanoid
+end
+
+local function onBotDeath(model)
+	local attacker = CombatManager.GetLastAttacker(model)
+	CombatManager.ClearLastAttacker(model)
+	if attacker and attacker.Parent and scores[attacker] ~= nil then
+		scores[attacker] += 1
+		DataManager.AddCoins(attacker, GameConfig.CoinsPerKill)
+		DataManager.IncrementKills(attacker)
+		notifyEvent:FireClient(attacker, "Abateu um BOT! +" .. GameConfig.CoinsPerKill .. " 🪙")
+		if scores[attacker] >= GameConfig.KillsToWin then
+			matchActive = false
+		end
+	end
+	local pos = model.PrimaryPart and model.PrimaryPart.Position
+	model:Destroy()
+	task.delay(BOT_RESPAWN, function()
+		if matchActive and enemiesFolder and enemiesFolder.Parent and pos then
+			MatchManager.SpawnBot(pos)
+		end
+	end)
+end
+
+function MatchManager.SpawnBot(position)
+	local model, humanoid = buildBot(position)
+	model.Parent = enemiesFolder
+	humanoid.Died:Once(function()
+		onBotDeath(model)
+	end)
+end
+
+local function spawnBots()
+	enemiesFolder = Instance.new("Folder")
+	enemiesFolder.Name = "Enemies"
+	enemiesFolder.Parent = workspace
+
+	local spots = {
+		Vector3.new(0, 4, 0),
+		Vector3.new(12, 4, 8),
+		Vector3.new(-12, 4, -8),
+	}
+	for i = 1, BOT_COUNT do
+		MatchManager.SpawnBot(spots[i] or Vector3.new(0, 4, 0))
+	end
+end
+
+local function clearBots()
+	if enemiesFolder then
+		enemiesFolder:Destroy()
+		enemiesFolder = nil
+	end
+end
+
+-- ===================================================================
+-- HELPERS
+-- ===================================================================
+local function broadcastState(extra)
+	local board = {}
+	for player, kills in pairs(scores) do
+		table.insert(board, { Name = player.Name, Kills = kills })
+	end
+	table.sort(board, function(a, b) return a.Kills > b.Kills end)
+
+	local state = {
+		Phase = phase,
+		MapName = currentMapDef and currentMapDef.Name or "—",
+		TimeLeft = math.max(0, math.floor(timeLeft)),
+		KillsToWin = GameConfig.KillsToWin,
+		Scores = board,
+	}
+	if extra then
+		for k, v in pairs(extra) do
+			state[k] = v
+		end
+	end
+	matchEvent:FireAllClients(state)
+end
+
+local function getSelectedBrawler(player)
+	local data = DataManager.Get(player)
+	return data and data.Selected or GameConfig.StartingBrawlers[1]
+end
+
+local function randomMapSpawn()
+	local points = currentMapDef.SpawnPoints
+	return CFrame.new(points[math.random(1, #points)])
+end
+
+-- ===================================================================
+-- SPAWN no LOBBY e na PARTIDA
+-- ===================================================================
+local function onLobbyDeath(player)
+	task.delay(1, function()
+		if player.Parent and phase ~= "MATCH" then
+			MatchManager.SpawnLobby(player)
+		end
+	end)
+end
+
+function MatchManager.SpawnLobby(player)
+	local spot = LOBBY_SPAWN_CFRAME * CFrame.new(math.random(-20, 20), 0, math.random(-20, 20))
+	Spawner.Spawn(player, getSelectedBrawler(player), spot, onLobbyDeath)
+end
+
+local function onMatchDeath(player, character)
+	local attacker = CombatManager.GetLastAttacker(character)
+	CombatManager.ClearLastAttacker(character)
+
+	if attacker and attacker ~= player and scores[attacker] ~= nil then
+		scores[attacker] += 1
+		DataManager.AddCoins(attacker, GameConfig.CoinsPerKill)
+		DataManager.IncrementKills(attacker)
+		notifyEvent:FireClient(attacker, "Abateu " .. player.Name .. "! +" .. GameConfig.CoinsPerKill .. " 🪙")
+		if scores[attacker] >= GameConfig.KillsToWin then
+			matchActive = false
+		end
+	end
+
+	broadcastState()
+
+	task.delay(GameConfig.RespawnDelay, function()
+		if matchActive and player.Parent and scores[player] ~= nil then
+			MatchManager.SpawnMatch(player)
+		end
+	end)
+end
+
+function MatchManager.SpawnMatch(player)
+	Spawner.Spawn(player, getSelectedBrawler(player), randomMapSpawn(), onMatchDeath)
+end
+
+-- ===================================================================
+-- CICLO
+-- ===================================================================
+local function runLobby()
+	phase = "LOBBY"
+	matchActive = false
+	currentMapDef = nil
+	clearBots()
+	if currentMap then
+		currentMap:Destroy()
+		currentMap = nil
+	end
+	for _, player in ipairs(Players:GetPlayers()) do
+		MatchManager.SpawnLobby(player)
+	end
+	broadcastState()
+
+	while #Players:GetPlayers() < GameConfig.MinPlayersToStart do
+		task.wait(1)
+	end
+end
+
+local function runCountdown()
+	phase = "COUNTDOWN"
+	for t = GameConfig.LobbyCountdown, 1, -1 do
+		if #Players:GetPlayers() < GameConfig.MinPlayersToStart then
+			return false
+		end
+		broadcastState({ Countdown = t })
+		task.wait(1)
+	end
+	return true
+end
+
+local function runMatch()
+	phase = "MATCH"
+	matchActive = true
+
+	currentMapDef = Maps[math.random(1, #Maps)]
+	currentMap = MapGenerator.Build(currentMapDef)
+
+	scores = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		scores[player] = 0
+	end
+	for _, player in ipairs(Players:GetPlayers()) do
+		MatchManager.SpawnMatch(player)
+	end
+
+	spawnBots()
+
+	notifyEvent:FireAllClients("Partida iniciada no mapa: " .. currentMapDef.Name)
+
+	timeLeft = GameConfig.MatchDurationSeconds
+	while matchActive and timeLeft > 0 do
+		broadcastState()
+		task.wait(1)
+		timeLeft -= 1
+	end
+	matchActive = false
+end
+
+local function endMatch()
+	local winner, best = nil, -1
+	for player, kills in pairs(scores) do
+		if kills > best then
+			best = kills
+			winner = player
+		end
+	end
+
+	for player in pairs(scores) do
+		if player.Parent then
+			DataManager.AddCoins(player, GameConfig.CoinsPerMatch)
+		end
+	end
+	if winner and winner.Parent then
+		DataManager.AddCoins(winner, GameConfig.CoinsPerWin)
+		DataManager.IncrementWins(winner)
+	end
+
+	broadcastState({ Winner = winner and winner.Name or "—" })
+	notifyEvent:FireAllClients(
+		(winner and ("🏆 " .. winner.Name .. " venceu com " .. best .. " kills!") or "Fim da partida!")
+		.. " +" .. GameConfig.CoinsPerMatch .. " 🪙 (vencedor +" .. GameConfig.CoinsPerWin .. ")"
+	)
+
+	task.wait(5)
+	scores = {}
+end
+
+function MatchManager.OnPlayerAdded(player)
+	MatchManager.SpawnLobby(player)
+	DataManager.Sync(player)
+end
+
+function MatchManager.Init(deps)
+	DataManager = deps.DataManager
+	Spawner = deps.Spawner
+	CombatManager = deps.CombatManager
+	MapGenerator = deps.MapGenerator
+
+	buildLobby()
+
+	task.spawn(function()
+		while true do
+			runLobby()
+			if runCountdown() then
+				runMatch()
+				endMatch()
+			end
+		end
+	end)
+end
+
+return MatchManager
+]]></ProtectedString></Properties></Item></Item><Item class="StarterPlayer" referent="RBX17"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX16"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="LocalScript" referent="RBX15"><Properties><string name="Name">Cliente</string><ProtectedString name="Source"><![CDATA[--[[
+	Client (LocalScript)
+	Interface, controles, câmera, efeitos, sons, minimapa e banners.
+
+	Local no Studio: StarterPlayer > StarterPlayerScripts > Client (ou Cliente)
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+local camera = workspace.CurrentCamera
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Brawlers = require(Shared.Brawlers)
+local Maps = require(Shared.Maps)
+local Net = require(Shared.Net)
+
+local attackEvent = Net.Event("Attack")
+local specialEvent = Net.Event("Special")
+local buyEvent = Net.Event("BuyBrawler")
+local selectEvent = Net.Event("SelectBrawler")
+local syncEvent = Net.Event("Sync")
+local matchEvent = Net.Event("Match")
+local notifyEvent = Net.Event("Notify")
+local fxEvent = Net.Event("AttackFX")
+local hitEvent = Net.Event("Hit")
+
+local myData = { Coins = 0, Owned = {}, Selected = "Shelly" }
+local superCooldownUntil = 0
+local superCooldownTotal = 1
+local lastHealth = nil
+local damageAlpha = 0
+local currentHalf = 50
+local currentPhase = "LOBBY"
+local minimapClock = 0
+local lastResult = 0
+
+-- ===================================================================
+-- HELPERS
+-- ===================================================================
+local function corner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 8)
+	c.Parent = parent
+	return c
+end
+
+local function gradient(parent, c1, c2, rot)
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new(c1, c2)
+	g.Rotation = rot or 90
+	g.Parent = parent
+	return g
+end
+
+local function stroke(parent, color, thickness, transparency)
+	local s = Instance.new("UIStroke")
+	s.Color = color or Color3.fromRGB(0, 0, 0)
+	s.Thickness = thickness or 1.5
+	s.Transparency = transparency or 0.4
+	s.Parent = parent
+	return s
+end
+
+local function make(class, props, parent)
+	local obj = Instance.new(class)
+	for k, v in pairs(props) do
+		obj[k] = v
+	end
+	if parent then
+		obj.Parent = parent
+	end
+	return obj
+end
+
+-- ===================================================================
+-- SONS (embutidos no Roblox, funcionam offline)
+-- ===================================================================
+local function makeSound(id, vol, pitch)
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = vol or 0.5
+	s.PlaybackSpeed = pitch or 1
+	s.Parent = SoundService
+	return s
+end
+local shootSound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.25, 1.5)
+local hitSound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.35, 0.85)
+local superSound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.6, 0.5)
+local buySound = makeSound("rbxasset://sounds/electronicpingshort.wav", 0.5, 1.1)
+
+local function playSound(s)
+	s.TimePosition = 0
+	s:Play()
+end
+
+-- ===================================================================
+-- CÂMERA estilo Brawl Stars
+-- ===================================================================
+local CAM_HEIGHT = 46
+local CAM_BACK = 26
+RunService:BindToRenderStep("BrawlCam", Enum.RenderPriority.Camera.Value + 1, function()
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+	camera.CameraType = Enum.CameraType.Scriptable
+	local target = root.Position
+	local desired = CFrame.lookAt(target + Vector3.new(0, CAM_HEIGHT, CAM_BACK), target)
+	local alpha = (camera.CFrame.Position - desired.Position).Magnitude > 120 and 1 or 0.16
+	camera.CFrame = camera.CFrame:Lerp(desired, alpha)
+end)
+
+-- ===================================================================
+-- INTERFACE
+-- ===================================================================
+local gui = make("ScreenGui", {
+	Name = "HUD",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, player:WaitForChild("PlayerGui"))
+
+-- vinheta de dano (vermelho nas bordas)
+local vigTop = make("Frame", {
+	Size = UDim2.new(1, 0, 0, 150),
+	BackgroundColor3 = Color3.fromRGB(255, 30, 30),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+}, gui)
+do
+	local g = Instance.new("UIGradient")
+	g.Rotation = 90
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	g.Parent = vigTop
+end
+local vigBot = make("Frame", {
+	Size = UDim2.new(1, 0, 0, 150),
+	Position = UDim2.new(0, 0, 1, -150),
+	BackgroundColor3 = Color3.fromRGB(255, 30, 30),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+}, gui)
+do
+	local g = Instance.new("UIGradient")
+	g.Rotation = 90
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	g.Parent = vigBot
+end
+
+-- Barra superior
+local topBar = make("Frame", {
+	Size = UDim2.new(1, 0, 0, 54),
+	BackgroundColor3 = Color3.fromRGB(28, 30, 42),
+	BorderSizePixel = 0,
+}, gui)
+gradient(topBar, Color3.fromRGB(38, 41, 58), Color3.fromRGB(20, 22, 32))
+
+local coinPill = make("Frame", {
+	Size = UDim2.new(0, 150, 0, 36),
+	Position = UDim2.new(0, 12, 0.5, -18),
+	BackgroundColor3 = Color3.fromRGB(45, 40, 20),
+}, topBar)
+corner(coinPill, 18)
+stroke(coinPill, Color3.fromRGB(255, 210, 90), 1.5, 0.3)
+local coinsLabel = make("TextLabel", {
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	TextSize = 20,
+	TextColor3 = Color3.fromRGB(255, 215, 90),
+	Text = "🪙 0",
+}, coinPill)
+
+local brawlerLabel = make("TextLabel", {
+	Size = UDim2.new(0, 300, 1, 0),
+	Position = UDim2.new(0.5, -150, 0, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	TextSize = 20,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Text = "Brawler: Shelly",
+}, topBar)
+
+local matchLabel = make("TextLabel", {
+	Size = UDim2.new(0, 380, 0, 30),
+	Position = UDim2.new(0.5, -190, 0, 62),
+	BackgroundColor3 = Color3.fromRGB(20, 22, 30),
+	BackgroundTransparency = 0.25,
+	Font = Enum.Font.GothamBold,
+	TextSize = 18,
+	TextColor3 = Color3.fromRGB(190, 235, 255),
+	Text = "Aguardando...",
+}, gui)
+corner(matchLabel, 10)
+stroke(matchLabel, Color3.fromRGB(120, 180, 255), 1.2, 0.5)
+
+-- Placar
+local scoreFrame = make("TextLabel", {
+	Size = UDim2.new(0, 230, 0, 130),
+	Position = UDim2.new(1, -242, 0, 96),
+	BackgroundColor3 = Color3.fromRGB(20, 22, 30),
+	BackgroundTransparency = 0.25,
+	Font = Enum.Font.GothamMedium,
+	TextSize = 16,
+	TextColor3 = Color3.fromRGB(235, 235, 235),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+	Text = "",
+}, gui)
+corner(scoreFrame, 10)
+stroke(scoreFrame, Color3.fromRGB(60, 65, 85), 1, 0.4)
+make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingTop = UDim.new(0, 8) }, scoreFrame)
+
+-- Barra de VIDA
+local healthBg = make("Frame", {
+	Size = UDim2.new(0, 280, 0, 24),
+	Position = UDim2.new(0.5, -140, 1, -54),
+	BackgroundColor3 = Color3.fromRGB(18, 18, 26),
+}, gui)
+corner(healthBg, 12)
+stroke(healthBg, Color3.fromRGB(0, 0, 0), 2, 0.3)
+local healthFill = make("Frame", {
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundColor3 = Color3.fromRGB(80, 220, 100),
+	BorderSizePixel = 0,
+}, healthBg)
+corner(healthFill, 12)
+gradient(healthFill, Color3.fromRGB(120, 255, 140), Color3.fromRGB(60, 190, 90))
+local healthText = make("TextLabel", {
+	Size = UDim2.new(1, 0, 1, 0),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	TextSize = 15,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	TextStrokeTransparency = 0.4,
+	Text = "100 / 100",
+}, healthBg)
+
+-- Minimapa
+local minimap = make("Frame", {
+	Size = UDim2.new(0, 150, 0, 150),
+	Position = UDim2.new(0, 12, 1, -164),
+	BackgroundColor3 = Color3.fromRGB(15, 17, 26),
+	BackgroundTransparency = 0.2,
+	Visible = false,
+}, gui)
+corner(minimap, 10)
+stroke(minimap, Color3.fromRGB(90, 120, 255), 1.5, 0.3)
+local dotsFolder = make("Frame", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, minimap)
+
+-- Aviso (toast)
+local toast = make("TextLabel", {
+	Size = UDim2.new(0, 440, 0, 38),
+	Position = UDim2.new(0.5, -220, 0.7, 0),
+	BackgroundColor3 = Color3.fromRGB(30, 32, 44),
+	Font = Enum.Font.GothamBold,
+	TextSize = 18,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Text = "",
+	TextTransparency = 1,
+}, gui)
+toast.BackgroundTransparency = 1
+corner(toast, 10)
+
+-- Banner de Vitória/Derrota
+local resultBanner = make("TextLabel", {
+	Size = UDim2.new(0, 560, 0, 100),
+	Position = UDim2.new(0.5, -280, 0.32, -50),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	TextSize = 60,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	TextStrokeTransparency = 0.2,
+	Text = "",
+	Visible = false,
+}, gui)
+
+-- Botão da loja
+local shopBtn = make("TextButton", {
+	Size = UDim2.new(0, 120, 0, 38),
+	Position = UDim2.new(1, -132, 0.5, -19),
+	BackgroundColor3 = Color3.fromRGB(95, 125, 255),
+	Font = Enum.Font.GothamBold,
+	TextSize = 18,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Text = "🛒 Loja (B)",
+}, topBar)
+corner(shopBtn, 10)
+gradient(shopBtn, Color3.fromRGB(120, 150, 255), Color3.fromRGB(80, 100, 230))
+stroke(shopBtn, Color3.fromRGB(180, 200, 255), 1.2, 0.3)
+
+-- Botões de combate (maiores p/ mobile)
+local attackBtn = make("TextButton", {
+	Size = UDim2.new(0, 130, 0, 130),
+	Position = UDim2.new(1, -150, 1, -162),
+	BackgroundColor3 = Color3.fromRGB(225, 70, 70),
+	Font = Enum.Font.GothamBold,
+	TextSize = 20,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Text = "ATIRAR",
+	AutoButtonColor = true,
+}, gui)
+corner(attackBtn, 65)
+gradient(attackBtn, Color3.fromRGB(255, 100, 100), Color3.fromRGB(200, 45, 45))
+stroke(attackBtn, Color3.fromRGB(255, 180, 180), 2.5, 0.15)
+
+local specialBtn = make("TextButton", {
+	Size = UDim2.new(0, 104, 0, 104),
+	Position = UDim2.new(1, -286, 1, -148),
+	BackgroundColor3 = Color3.fromRGB(245, 195, 50),
+	Font = Enum.Font.GothamBold,
+	TextSize = 17,
+	TextColor3 = Color3.fromRGB(50, 35, 0),
+	Text = "SUPER\n(Q)",
+	ClipsDescendants = true,
+}, gui)
+corner(specialBtn, 52)
+gradient(specialBtn, Color3.fromRGB(255, 225, 90), Color3.fromRGB(230, 170, 30))
+stroke(specialBtn, Color3.fromRGB(255, 235, 160), 2.5, 0.15)
+local superCd = make("Frame", {
+	Size = UDim2.new(1, 0, 0, 0),
+	BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+	BackgroundTransparency = 0.45,
+	BorderSizePixel = 0,
+	ZIndex = 2,
+}, specialBtn)
+
+-- ===================================================================
+-- LOJA
+-- ===================================================================
+local shopOpen = false
+local shopFrame = make("Frame", {
+	Size = UDim2.new(0, 480, 0, 410),
+	Position = UDim2.new(0.5, -240, 0.5, -205),
+	BackgroundColor3 = Color3.fromRGB(26, 28, 40),
+	Visible = false,
+}, gui)
+corner(shopFrame, 16)
+stroke(shopFrame, Color3.fromRGB(90, 120, 255), 2.5, 0.15)
+gradient(shopFrame, Color3.fromRGB(36, 39, 58), Color3.fromRGB(20, 22, 34))
+
+make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 48),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	TextSize = 26,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Text = "🛒 LOJA DE BRAWLERS",
+}, shopFrame)
+
+local closeBtn = make("TextButton", {
+	Size = UDim2.new(0, 38, 0, 38),
+	Position = UDim2.new(1, -46, 0, 6),
+	BackgroundColor3 = Color3.fromRGB(225, 70, 70),
+	Font = Enum.Font.GothamBold,
+	TextSize = 20,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Text = "X",
+}, shopFrame)
+corner(closeBtn, 10)
+
+local list = make("ScrollingFrame", {
+	Size = UDim2.new(1, -20, 1, -60),
+	Position = UDim2.new(0, 10, 0, 52),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 6,
+	CanvasSize = UDim2.new(0, 0, 0, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, shopFrame)
+make("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+local function refreshShop()
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	local names = {}
+	for name in pairs(Brawlers) do
+		table.insert(names, name)
+	end
+	table.sort(names, function(a, b) return Brawlers[a].Price < Brawlers[b].Price end)
+
+	for _, name in ipairs(names) do
+		local b = Brawlers[name]
+		local owned = table.find(myData.Owned, name) ~= nil
+		local selected = (myData.Selected == name)
+
+		local row = make("Frame", {
+			Size = UDim2.new(1, -6, 0, 66),
+			BackgroundColor3 = Color3.fromRGB(38, 41, 56),
+		}, list)
+		corner(row, 12)
+		stroke(row, selected and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(60, 65, 85), selected and 2 or 1, 0.35)
+
+		local swatch = make("Frame", {
+			Size = UDim2.new(0, 46, 0, 46),
+			Position = UDim2.new(0, 12, 0.5, -23),
+			BackgroundColor3 = b.Color,
+		}, row)
+		corner(swatch, 12)
+		stroke(swatch, Color3.fromRGB(255, 255, 255), 1.5, 0.5)
+
+		make("TextLabel", {
+			Size = UDim2.new(0, 210, 1, 0),
+			Position = UDim2.new(0, 68, 0, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			TextSize = 17,
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = b.DisplayName .. "\n❤️" .. b.Health .. "   ⚔️" .. b.Damage .. "   🎯" .. b.Range,
+		}, row)
+
+		local btn = make("TextButton", {
+			Size = UDim2.new(0, 124, 0, 44),
+			Position = UDim2.new(1, -134, 0.5, -22),
+			Font = Enum.Font.GothamBold,
+			TextSize = 16,
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+		}, row)
+		corner(btn, 10)
+
+		if selected then
+			btn.Text = "✔ EM USO"
+			btn.BackgroundColor3 = Color3.fromRGB(60, 170, 95)
+		elseif owned then
+			btn.Text = "USAR"
+			btn.BackgroundColor3 = Color3.fromRGB(80, 120, 220)
+			btn.MouseButton1Click:Connect(function()
+				selectEvent:FireServer(name)
+			end)
+		else
+			btn.Text = "🪙 " .. b.Price
+			btn.BackgroundColor3 = Color3.fromRGB(230, 170, 40)
+			btn.MouseButton1Click:Connect(function()
+				buyEvent:FireServer(name)
+			end)
+		end
+	end
+end
+
+local function toggleShop()
+	shopOpen = not shopOpen
+	shopFrame.Visible = shopOpen
+	if shopOpen then
+		refreshShop()
+	end
+end
+
+shopBtn.MouseButton1Click:Connect(toggleShop)
+closeBtn.MouseButton1Click:Connect(toggleShop)
+
+-- ===================================================================
+-- CONTROLES
+-- ===================================================================
+local function getAimDirection()
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return nil
+	end
+	-- mira no chão (altura do personagem) embaixo do cursor
+	local ray = mouse.UnitRay
+	local origin, dirv = ray.Origin, ray.Direction
+	if math.abs(dirv.Y) > 1e-4 then
+		local t = (root.Position.Y - origin.Y) / dirv.Y
+		if t > 0 then
+			local hit = origin + dirv * t
+			local d = Vector3.new(hit.X - root.Position.X, 0, hit.Z - root.Position.Z)
+			if d.Magnitude > 0.1 then
+				return d.Unit
+			end
+		end
+	end
+	local look = root.CFrame.LookVector
+	return Vector3.new(look.X, 0, look.Z).Unit
+end
+
+-- efeito local ao usar o Super (anel que se expande)
+local function superBurst()
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+	local b = Brawlers[myData.Selected]
+	local color = b and b.Color or Color3.new(1, 1, 1)
+	local ring = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Shape = Enum.PartType.Cylinder,
+		Material = Enum.Material.Neon,
+		Color = color,
+		Size = Vector3.new(0.6, 4, 4),
+		CFrame = CFrame.new(root.Position - Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+	}, workspace)
+	task.spawn(function()
+		for i = 1, 12 do
+			ring.Size = ring.Size + Vector3.new(0, 4, 4)
+			ring.Transparency = i / 12
+			task.wait(0.02)
+		end
+		ring:Destroy()
+	end)
+end
+
+local function doAttack()
+	local dir = getAimDirection()
+	if dir then
+		attackEvent:FireServer(dir)
+	end
+end
+
+local function doSpecial()
+	if os.clock() < superCooldownUntil then
+		return
+	end
+	local dir = getAimDirection()
+	if dir then
+		specialEvent:FireServer(dir)
+		playSound(superSound)
+		superBurst()
+		local b = Brawlers[myData.Selected]
+		local cd = b and b.Special and b.Special.Cooldown or 8
+		superCooldownTotal = cd
+		superCooldownUntil = os.clock() + cd
+	end
+end
+
+attackBtn.MouseButton1Click:Connect(doAttack)
+specialBtn.MouseButton1Click:Connect(doSpecial)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		doAttack()
+	elseif input.KeyCode == Enum.KeyCode.Q then
+		doSpecial()
+	elseif input.KeyCode == Enum.KeyCode.B then
+		toggleShop()
+	end
+end)
+
+-- ===================================================================
+-- BANNER de Vitória/Derrota
+-- ===================================================================
+local function showResult(winnerName)
+	if os.clock() - lastResult < 6 then
+		return
+	end
+	lastResult = os.clock()
+	local win = (winnerName == player.Name)
+	resultBanner.Text = win and "🏆 VITÓRIA!" or "💀 DERROTA"
+	resultBanner.TextColor3 = win and Color3.fromRGB(120, 255, 150) or Color3.fromRGB(255, 110, 110)
+	resultBanner.Visible = true
+	resultBanner.TextTransparency = 0
+	resultBanner.Size = UDim2.new(0, 200, 0, 100)
+	resultBanner.Position = UDim2.new(0.5, -100, 0.32, -50)
+	TweenService:Create(resultBanner, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = UDim2.new(0, 560, 0, 100),
+		Position = UDim2.new(0.5, -280, 0.32, -50),
+	}):Play()
+	task.delay(3, function()
+		TweenService:Create(resultBanner, TweenInfo.new(0.6), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		task.wait(0.6)
+		resultBanner.Visible = false
+		resultBanner.TextStrokeTransparency = 0.2
+	end)
+end
+
+-- ===================================================================
+-- LOOP (vida, super, vinheta, minimapa)
+-- ===================================================================
+local function addDot(worldPos, color, size)
+	local nx = math.clamp(worldPos.X / currentHalf, -1, 1)
+	local nz = math.clamp(worldPos.Z / currentHalf, -1, 1)
+	local dot = make("Frame", {
+		Size = UDim2.new(0, size, 0, size),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5 + nx * 0.46, 0, 0.5 + nz * 0.46, 0),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+	}, dotsFolder)
+	corner(dot, math.floor(size / 2))
+end
+
+RunService.RenderStepped:Connect(function(dt)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+	-- barra de vida + detecção de dano
+	if hum and hum.Health > 0 then
+		local ratio = hum.MaxHealth > 0 and math.clamp(hum.Health / hum.MaxHealth, 0, 1) or 0
+		healthFill.Size = UDim2.new(ratio, 0, 1, 0)
+		healthText.Text = math.floor(hum.Health) .. " / " .. math.floor(hum.MaxHealth)
+		healthBg.Visible = true
+		if lastHealth and hum.Health < lastHealth - 0.5 then
+			damageAlpha = math.min(1, damageAlpha + 0.6)
+		end
+		lastHealth = hum.Health
+	else
+		healthBg.Visible = false
+		lastHealth = nil
+	end
+
+	-- vinheta de dano some aos poucos
+	if damageAlpha > 0 then
+		damageAlpha = math.max(0, damageAlpha - dt * 1.6)
+	end
+	vigTop.BackgroundTransparency = 1 - damageAlpha * 0.7
+	vigBot.BackgroundTransparency = 1 - damageAlpha * 0.7
+
+	-- cooldown do super
+	local remaining = superCooldownUntil - os.clock()
+	if remaining > 0 then
+		local r = math.clamp(remaining / superCooldownTotal, 0, 1)
+		superCd.Size = UDim2.new(1, 0, r, 0)
+		specialBtn.Text = string.format("%.1fs", remaining)
+	else
+		superCd.Size = UDim2.new(1, 0, 0, 0)
+		specialBtn.Text = "SUPER\n(Q)"
+	end
+
+	-- minimapa (atualiza ~10x/seg)
+	minimapClock += dt
+	if minimap.Visible and minimapClock >= 0.1 then
+		minimapClock = 0
+		dotsFolder:ClearAllChildren()
+		for _, pl in ipairs(Players:GetPlayers()) do
+			local r = pl.Character and pl.Character:FindFirstChild("HumanoidRootPart")
+			if r then
+				addDot(r.Position, pl == player and Color3.fromRGB(90, 255, 130) or Color3.fromRGB(90, 160, 255), pl == player and 11 or 9)
+			end
+		end
+		local en = workspace:FindFirstChild("Enemies")
+		if en then
+			for _, m in ipairs(en:GetChildren()) do
+				local r = m:FindFirstChild("HumanoidRootPart")
+				if r then
+					addDot(r.Position, Color3.fromRGB(255, 80, 80), 8)
+				end
+			end
+		end
+	end
+end)
+
+-- ===================================================================
+-- EFEITOS DE TIRO
+-- ===================================================================
+fxEvent.OnClientEvent:Connect(function(origin, direction, range, color)
+	playSound(shootSound)
+	local beam = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Material = Enum.Material.Neon,
+		Color = color,
+		Size = Vector3.new(0.5, 0.5, range),
+		CFrame = CFrame.lookAt(origin + direction * (range / 2), origin + direction * range),
+	}, workspace)
+	task.spawn(function()
+		for i = 1, 6 do
+			beam.Transparency = i / 6
+			beam.Size = Vector3.new(0.5 - i * 0.06, 0.5 - i * 0.06, range)
+			task.wait(0.02)
+		end
+		beam:Destroy()
+	end)
+
+	local flash = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Shape = Enum.PartType.Ball,
+		Material = Enum.Material.Neon,
+		Color = color,
+		Size = Vector3.new(2.4, 2.4, 2.4),
+		CFrame = CFrame.new(origin + direction * 2),
+	}, workspace)
+	Debris:AddItem(flash, 0.08)
+end)
+
+hitEvent.OnClientEvent:Connect(function(position, damage, color)
+	playSound(hitSound)
+
+	-- faísca + partículas
+	local spark = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Shape = Enum.PartType.Ball,
+		Material = Enum.Material.Neon,
+		Color = color,
+		Size = Vector3.new(1.4, 1.4, 1.4),
+		CFrame = CFrame.new(position),
+	}, workspace)
+	local emitter = make("ParticleEmitter", {
+		Color = ColorSequence.new(color),
+		Lifetime = NumberRange.new(0.25, 0.4),
+		Speed = NumberRange.new(7, 12),
+		SpreadAngle = Vector2.new(180, 180),
+		Rate = 0,
+		Size = NumberSequence.new(0.7, 0),
+		Rotation = NumberRange.new(0, 360),
+	}, spark)
+	emitter:Emit(14)
+	task.spawn(function()
+		for i = 1, 5 do
+			spark.Size = spark.Size + Vector3.new(0.5, 0.5, 0.5)
+			spark.Transparency = i / 5
+			task.wait(0.02)
+		end
+		spark:Destroy()
+	end)
+
+	-- número de dano subindo
+	local holder = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Transparency = 1,
+		Size = Vector3.new(0.2, 0.2, 0.2),
+		CFrame = CFrame.new(position + Vector3.new(math.random(-10, 10) / 10, 2, 0)),
+	}, workspace)
+	local bb = make("BillboardGui", {
+		Size = UDim2.new(0, 80, 0, 40),
+		AlwaysOnTop = true,
+		Adornee = holder,
+	}, holder)
+	local dmgLabel = make("TextLabel", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 26,
+		TextColor3 = Color3.fromRGB(255, 230, 120),
+		TextStrokeTransparency = 0.2,
+		Text = "-" .. math.floor(damage),
+	}, bb)
+	task.spawn(function()
+		for i = 1, 14 do
+			holder.CFrame = holder.CFrame + Vector3.new(0, 0.18, 0)
+			dmgLabel.TextTransparency = i / 14
+			dmgLabel.TextStrokeTransparency = 0.2 + (i / 14) * 0.8
+			task.wait(0.03)
+		end
+		holder:Destroy()
+	end)
+end)
+
+-- ===================================================================
+-- DADOS DO SERVIDOR
+-- ===================================================================
+syncEvent.OnClientEvent:Connect(function(data)
+	local hadLess = data.Coins < (myData.Coins or 0)
+	myData = data
+	coinsLabel.Text = "🪙 " .. data.Coins
+	local b = Brawlers[data.Selected]
+	brawlerLabel.Text = "Brawler: " .. (b and b.DisplayName or data.Selected)
+	if not hadLess and data.Coins > 0 then
+		-- som leve quando ganha/compra
+	end
+	if shopOpen then
+		refreshShop()
+	end
+end)
+
+matchEvent.OnClientEvent:Connect(function(state)
+	currentPhase = state.Phase
+	if state.Phase == "COUNTDOWN" then
+		matchLabel.Text = "⚔️ Começa em " .. (state.Countdown or "?") .. "s..."
+	elseif state.Phase == "MATCH" then
+		matchLabel.Text = "🗺️ " .. state.MapName .. "   ⏱️ " .. state.TimeLeft .. "s   🎯 " .. state.KillsToWin
+	else
+		matchLabel.Text = state.Winner and ("🏆 Vencedor: " .. state.Winner) or "🏠 No lobby — aguardando..."
+	end
+
+	-- tamanho do mapa atual p/ o minimapa
+	for _, m in ipairs(Maps) do
+		if m.Name == state.MapName then
+			currentHalf = math.max(m.Size.X, m.Size.Z) / 2
+		end
+	end
+	minimap.Visible = (state.Phase == "MATCH")
+
+	-- banner de fim
+	if state.Winner and state.Winner ~= "—" then
+		showResult(state.Winner)
+	end
+
+	local txt = "🏅 PLACAR\n"
+	local medals = { "🥇", "🥈", "🥉" }
+	for i, entry in ipairs(state.Scores or {}) do
+		txt ..= (medals[i] or (i .. ".")) .. " " .. entry.Name .. " — " .. entry.Kills .. "\n"
+		if i >= 5 then
+			break
+		end
+	end
+	scoreFrame.Text = txt
+end)
+
+local toastTween
+notifyEvent.OnClientEvent:Connect(function(message)
+	toast.Text = message
+	toast.TextTransparency = 0
+	toast.BackgroundTransparency = 0.15
+	local id = tick()
+	toastTween = id
+	task.delay(2.5, function()
+		if toastTween == id then
+			for a = 0, 1, 0.1 do
+				toast.TextTransparency = a
+				toast.BackgroundTransparency = 0.15 + a * 0.85
+				task.wait(0.03)
+			end
+		end
+	end)
+end)
+
+print("[BrawlArena] Cliente pronto ✔")
+]]></ProtectedString></Properties></Item></Item></Item></roblox>
