@@ -92,49 +92,130 @@ local Maps = {
 		},
 	},
 
-	-- ===================== MAPA 4 (vila, com tema "Theme = Village") =====================
-	-- Campos extras lidos pelo MapGenerator quando Theme == "Village":
-	-- Houses, Towers, Trees, TrainingPosts, Monument, Gate, Arena
+	-- ===================== MAPA 4: VILA NINJA (Theme = "Village") =====================
+	-- Layout: portão (sul) -> caminho com cerejeiras/lanternas -> praça da fonte
+	-- -> templo (centro) -> rio com ponte -> área de treino / floresta / caverna (norte)
+	-- Arena de batalha fica num braço a leste. Casas espalhadas pelo centro.
 	{
-		Name = "Vila Oculta",
+		Name = "Vila Ninja",
 		Theme = "Village",
-		Size = Vector3.new(140, 1, 140),
+		Size = Vector3.new(150, 1, 150),
 		FloorColor = Color3.fromRGB(195, 165, 110),
 		ObstacleColor = Color3.fromRGB(150, 115, 70),
 		Material = Enum.Material.Ground,
 		Obstacles = {},
 		SpawnPoints = {
-			Vector3.new(-60, 4, -60), Vector3.new(60, 4, -60),
-			Vector3.new(-60, 4, 60),  Vector3.new(60, 4, 60),
-			Vector3.new(0, 4, -65),   Vector3.new(0, 4, 65),
-			Vector3.new(-65, 4, 0),   Vector3.new(65, 4, 0),
+			Vector3.new(-65, 4, -65), Vector3.new(65, 4, -65),
+			Vector3.new(-65, 4, 65),  Vector3.new(65, 4, 65),
+			Vector3.new(0, 4, -70),   Vector3.new(0, 4, 70),
+			Vector3.new(-70, 4, 0),   Vector3.new(70, 4, 0),
 		},
+
+		-- casas de telhado vermelho espalhadas pelo centro da vila
 		Houses = {
-			{ Pos = Vector3.new(20, 0, 35),  Color = Color3.fromRGB(225, 200, 160) },
-			{ Pos = Vector3.new(-22, 0, 33), Color = Color3.fromRGB(210, 190, 150) },
-			{ Pos = Vector3.new(34, 0, 8),   Color = Color3.fromRGB(220, 195, 155) },
-			{ Pos = Vector3.new(-34, 0, 6),  Color = Color3.fromRGB(215, 188, 148) },
-			{ Pos = Vector3.new(30, 0, -18), Color = Color3.fromRGB(225, 200, 160) },
-			{ Pos = Vector3.new(-30, 0, -20),Color = Color3.fromRGB(210, 190, 150) },
-			{ Pos = Vector3.new(14, 0, 18),  Color = Color3.fromRGB(220, 195, 155) },
-			{ Pos = Vector3.new(-16, 0, 16), Color = Color3.fromRGB(215, 188, 148) },
+			{ Pos = Vector3.new(20, 0, 38),   Color = Color3.fromRGB(225, 200, 160) },
+			{ Pos = Vector3.new(-22, 0, 36),  Color = Color3.fromRGB(210, 190, 150) },
+			{ Pos = Vector3.new(36, 0, 12),   Color = Color3.fromRGB(220, 195, 155) },
+			{ Pos = Vector3.new(-36, 0, 10),  Color = Color3.fromRGB(215, 188, 148) },
+			{ Pos = Vector3.new(32, 0, -10),  Color = Color3.fromRGB(225, 200, 160) },
+			{ Pos = Vector3.new(-32, 0, -10), Color = Color3.fromRGB(210, 190, 150) },
+			{ Pos = Vector3.new(16, 0, 18),   Color = Color3.fromRGB(220, 195, 155) },
+			{ Pos = Vector3.new(-18, 0, 16),  Color = Color3.fromRGB(215, 188, 148) },
+			{ Pos = Vector3.new(8, 0, 50),    Color = Color3.fromRGB(220, 195, 155) },
+			{ Pos = Vector3.new(-10, 0, 52),  Color = Color3.fromRGB(215, 188, 148) },
 		},
-		Towers = {
-			{ Pos = Vector3.new(0, 0, 0), Height = 14 },
+
+		-- templo antigo (centro da vila)
+		Temple = { Pos = Vector3.new(0, 0, 0), Width = 20, Depth = 20, Height = 11 },
+
+		-- praça central com fonte, no caminho entre o portão e o templo
+		Fountain = { Pos = Vector3.new(0, 0, 28), Radius = 5 },
+
+		-- rio com ponte separando a vila (sul) da área de treino/floresta (norte)
+		River = {
+			Pos = Vector3.new(0, -0.3, -36),
+			Size = Vector3.new(150, 0.8, 14),
+			Bridge = { Pos = Vector3.new(0, 0.3, -36), Size = Vector3.new(7, 0.6, 20) },
 		},
+
+		-- área de treinamento (norte, a leste da ponte)
 		TrainingPosts = {
-			Vector3.new(42, 0, -40), Vector3.new(46, 0, -37), Vector3.new(50, 0, -41),
-			Vector3.new(44, 0, -45), Vector3.new(48, 0, -46),
+			Vector3.new(38, 0, -52), Vector3.new(42, 0, -48), Vector3.new(46, 0, -54),
+			Vector3.new(40, 0, -58), Vector3.new(44, 0, -44),
 		},
+
+		-- floresta densa (norte, a oeste) + caverna secreta escondida nela
 		Trees = {
-			Vector3.new(-44, 0, -40), Vector3.new(-50, 0, -38), Vector3.new(-55, 0, -44),
-			Vector3.new(-48, 0, -50), Vector3.new(-42, 0, -52), Vector3.new(-56, 0, -32),
-			Vector3.new(-38, 0, -46), Vector3.new(-52, 0, -55), Vector3.new(-60, 0, -46),
-			Vector3.new(-46, 0, -58),
+			Vector3.new(-44, 0, -48), Vector3.new(-50, 0, -44), Vector3.new(-55, 0, -52),
+			Vector3.new(-48, 0, -58), Vector3.new(-40, 0, -60), Vector3.new(-58, 0, -38),
+			Vector3.new(-36, 0, -52), Vector3.new(-52, 0, -64), Vector3.new(-62, 0, -50),
+			Vector3.new(-46, 0, -66), Vector3.new(-30, 0, -58), Vector3.new(-60, 0, -60),
 		},
-		Monument = { Pos = Vector3.new(0, 0, -58) },
-		Gate = { Pos = Vector3.new(0, 0, 60) },
-		Arena = { Pos = Vector3.new(48, 0, 42), Radius = 13 },
+		Cave = { Pos = Vector3.new(-66, 0, -28) },
+
+		-- cerejeiras ao longo do caminho principal e da praça
+		CherryTrees = {
+			Vector3.new(10, 0, 12),  Vector3.new(-10, 0, 12),
+			Vector3.new(14, 0, 28),  Vector3.new(-14, 0, 28),
+			Vector3.new(10, 0, 44),  Vector3.new(-10, 0, 44),
+			Vector3.new(20, 0, 58),  Vector3.new(-20, 0, 58),
+			Vector3.new(0, 0, -2),   Vector3.new(28, 0, 0),
+		},
+
+		-- bambuzais perto da floresta e ladeando o templo
+		BambooClusters = {
+			{ Pos = Vector3.new(-12, 0, -8), Count = 7, Radius = 3 },
+			{ Pos = Vector3.new(12, 0, -8),  Count = 7, Radius = 3 },
+			{ Pos = Vector3.new(-58, 0, -56),Count = 6, Radius = 2.5 },
+		},
+
+		-- monumento de pedra no fundo
+		Monument = { Pos = Vector3.new(0, 0, -68) },
+
+		-- portão de entrada (sul)
+		Gate = { Pos = Vector3.new(0, 0, 64) },
+
+		-- arena de batalha (braço a leste)
+		Arena = { Pos = Vector3.new(56, 0, 40), Radius = 13 },
+
+		-- lanternas japonesas iluminando o caminho principal
+		Lanterns = {
+			Vector3.new(6, 0, 18),  Vector3.new(-6, 0, 18),
+			Vector3.new(6, 0, 36),  Vector3.new(-6, 0, 36),
+			Vector3.new(6, 0, 52),  Vector3.new(-6, 0, 52),
+			Vector3.new(10, 0, 64), Vector3.new(-10, 0, 64),
+		},
+
+		-- cercas de madeira em volta da área de treino e da praça
+		Fences = {
+			{ From = Vector3.new(28, 0, -40), To = Vector3.new(28, 0, -64) },
+			{ From = Vector3.new(28, 0, -64), To = Vector3.new(52, 0, -64) },
+			{ From = Vector3.new(-6, 0, 22),  To = Vector3.new(6, 0, 22) },
+		},
+
+		-- bancos perto da fonte
+		Benches = {
+			Vector3.new(0, 0, 20), Vector3.new(0, 0, 36),
+		},
+
+		-- bandeiras perto do portão e da arena
+		Flags = {
+			{ Pos = Vector3.new(-12, 0, 62), Color = Color3.fromRGB(180, 30, 30) },
+			{ Pos = Vector3.new(12, 0, 62),  Color = Color3.fromRGB(180, 30, 30) },
+			{ Pos = Vector3.new(42, 0, 40),  Color = Color3.fromRGB(40, 60, 150) },
+		},
+
+		-- placas indicando os locais
+		Signs = {
+			{ Pos = Vector3.new(8, 0, 60),    Text = "Entrada da Vila" },
+			{ Pos = Vector3.new(4, 0, 22),    Text = "Praça da Fonte" },
+			{ Pos = Vector3.new(8, 0, -4),    Text = "Templo Antigo" },
+			{ Pos = Vector3.new(34, 0, -38),  Text = "Treinamento" },
+			{ Pos = Vector3.new(-34, 0, -38), Text = "Floresta Densa" },
+			{ Pos = Vector3.new(48, 0, 28),   Text = "Arena de Batalha" },
+		},
+
+		DecorDensity = 55,
 	},
 }
 

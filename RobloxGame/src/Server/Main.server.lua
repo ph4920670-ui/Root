@@ -16,6 +16,7 @@ Players.CharacterAutoLoads = false
 -- VISUAL: iluminação + atmosfera bonitas (tira o cinza padrão)
 -- ===================================================================
 local function setupScene()
+	Lighting.Technology = Enum.Technology.Future -- Future Lighting (sombras/reflexos melhores)
 	Lighting.ClockTime = 14.5
 	Lighting.Brightness = 2.6
 	Lighting.Ambient = Color3.fromRGB(70, 70, 85)
@@ -23,7 +24,7 @@ local function setupScene()
 	Lighting.EnvironmentDiffuseScale = 0.45
 	Lighting.EnvironmentSpecularScale = 0.45
 	Lighting.GeographicLatitude = 25
-	Lighting.ShadowSoftness = 0.4
+	Lighting.ShadowSoftness = 0.55 -- sombras mais suaves
 	Lighting.FogEnd = 100000 -- remove a névoa cinza pesada
 
 	for _, name in ipairs({ "BA_Atmosphere", "BA_Bloom", "BA_Color", "BA_Sky", "BA_Sun" }) do
