@@ -76,6 +76,26 @@ local Brawlers = {
 		Special = { Damage = 50, Range = 70, Spread = 3, Cooldown = 10 },
 		Skin = { Hat = "Cone", HatColor = Color3.fromRGB(170, 40, 110), Scale = 0.9 },
 	},
+
+	-- ninja ágil: cabelo espetado loiro + bandana, inspirado em ninjas de anime
+	Kage = {
+		DisplayName = "Kage",
+		Price = 650,
+		Health = 85,
+		WalkSpeed = 18,
+		Damage = 11,
+		Range = 52,
+		Spread = 7,
+		ReloadTime = 0.22,
+		Color = Color3.fromRGB(255, 145, 35),
+		-- Especial: explosão em todas as direções (Spread 360 = atinge ao redor)
+		Special = { Damage = 40, Range = 34, Spread = 360, Cooldown = 11 },
+		Skin = {
+			Hat = "Headband", HatColor = Color3.fromRGB(50, 80, 150),
+			Hair = true, HairColor = Color3.fromRGB(255, 221, 90),
+			Scale = 1.0,
+		},
+	},
 }
 
 return Brawlers

@@ -41,6 +41,62 @@ local HAT_PRESETS = {
 	Cone   = { Shape = Enum.PartType.Cylinder, Size = Vector3.new(2.2, 1.6, 1.6), Offset = 1.0,  Rotate = true },
 }
 
+-- cabelo espetado (estilo anime), feito só com peças (sem upload de mesh)
+local function addHairSpikes(character, head, color, count)
+	count = count or 7
+	local top = head.Position + Vector3.new(0, head.Size.Y / 2, 0)
+	for i = 1, count do
+		local angle = (i - 1) * (2 * math.pi / count)
+		local dir = Vector3.new(math.cos(angle), 1.4, math.sin(angle)).Unit
+		local base = top + dir * 0.2
+		local spike = Instance.new("WedgePart")
+		spike.Name = "HairSpike"
+		spike.Size = Vector3.new(0.55, 1.4, 0.65)
+		spike.Color = color
+		spike.Material = Enum.Material.SmoothPlastic
+		spike.CanCollide = false
+		spike.Massless = true
+		spike.CFrame = CFrame.new(base, base + dir) * CFrame.Angles(math.rad(-90), 0, 0)
+		spike.Parent = character
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = spike
+		weld.Part1 = head
+		weld.Parent = spike
+	end
+end
+
+-- bandana ninja (faixa em volta da cabeça + placa metálica na frente)
+local function addHeadband(character, head, color)
+	local band = Instance.new("Part")
+	band.Name = "Headband"
+	band.Size = Vector3.new(head.Size.X + 0.15, 0.42, head.Size.Z + 0.15)
+	band.Color = color
+	band.Material = Enum.Material.SmoothPlastic
+	band.CanCollide = false
+	band.Massless = true
+	band.CFrame = head.CFrame
+	band.Parent = character
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = band
+	weld.Part1 = head
+	weld.Parent = band
+
+	local plate = Instance.new("Part")
+	plate.Name = "HeadbandPlate"
+	plate.Size = Vector3.new(0.9, 0.5, 0.14)
+	plate.Color = Color3.fromRGB(195, 200, 210)
+	plate.Material = Enum.Material.Metal
+	plate.CanCollide = false
+	plate.Massless = true
+	plate.CFrame = head.CFrame * CFrame.new(0, 0, -head.Size.Z / 2 - 0.06)
+	plate.Parent = character
+	local weld2 = Instance.new("WeldConstraint")
+	weld2.Part0 = plate
+	weld2.Part1 = head
+	weld2.Parent = plate
+end
+
 local function applySkin(character, skin)
 	if not skin then
 		return
@@ -51,29 +107,41 @@ local function applySkin(character, skin)
 			character:ScaleTo(skin.Scale)
 		end)
 	end
-	-- chapéu
-	local preset = HAT_PRESETS[skin.Hat]
-	local head = character:FindFirstChild("Head")
-	if preset and head then
-		local hat = Instance.new("Part")
-		hat.Name = "BrawlHat"
-		hat.Shape = preset.Shape
-		hat.Size = preset.Size
-		hat.Color = skin.HatColor or Color3.fromRGB(60, 60, 60)
-		hat.Material = Enum.Material.SmoothPlastic
-		hat.CanCollide = false
-		hat.Massless = true
-		local cf = head.CFrame * CFrame.new(0, head.Size.Y / 2 + preset.Offset, 0)
-		if preset.Rotate then
-			cf = cf * CFrame.Angles(0, 0, math.rad(90)) -- deita o cilindro como "boné"
-		end
-		hat.CFrame = cf
-		hat.Parent = character
 
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = hat
-		weld.Part1 = head
-		weld.Parent = hat
+	local head = character:FindFirstChild("Head")
+	if not head then
+		return
+	end
+
+	if skin.Hat == "Headband" then
+		addHeadband(character, head, skin.HatColor or Color3.fromRGB(40, 70, 140))
+	else
+		local preset = HAT_PRESETS[skin.Hat]
+		if preset then
+			local hat = Instance.new("Part")
+			hat.Name = "BrawlHat"
+			hat.Shape = preset.Shape
+			hat.Size = preset.Size
+			hat.Color = skin.HatColor or Color3.fromRGB(60, 60, 60)
+			hat.Material = Enum.Material.SmoothPlastic
+			hat.CanCollide = false
+			hat.Massless = true
+			local cf = head.CFrame * CFrame.new(0, head.Size.Y / 2 + preset.Offset, 0)
+			if preset.Rotate then
+				cf = cf * CFrame.Angles(0, 0, math.rad(90)) -- deita o cilindro como "boné"
+			end
+			hat.CFrame = cf
+			hat.Parent = character
+
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = hat
+			weld.Part1 = head
+			weld.Parent = hat
+		end
+	end
+
+	if skin.Hair then
+		addHairSpikes(character, head, skin.HairColor or Color3.fromRGB(20, 20, 20), skin.HairCount)
 	end
 end
 

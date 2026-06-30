@@ -122,6 +122,27 @@ local function botHealthBar(model, humanoid)
 	end)
 end
 
+-- cabelo espetado preto, estilo guerreiro de anime (só com peças, sem upload de mesh)
+local function addBotHair(model, head)
+	local color = Color3.fromRGB(15, 15, 18)
+	local top = head.Position + Vector3.new(0, head.Size.Y / 2, 0)
+	local count = 8
+	for i = 1, count do
+		local angle = (i - 1) * (2 * math.pi / count)
+		local dir = Vector3.new(math.cos(angle), 1.5, math.sin(angle)).Unit
+		local base = top + dir * 0.2
+		local spike = Instance.new("WedgePart")
+		spike.Name = "HairSpike"
+		spike.Size = Vector3.new(0.5, 1.3, 0.6)
+		spike.Color = color
+		spike.Material = Enum.Material.SmoothPlastic
+		spike.Anchored = true
+		spike.CanCollide = false
+		spike.CFrame = CFrame.new(base, base + dir) * CFrame.Angles(math.rad(-90), 0, 0)
+		spike.Parent = model
+	end
+end
+
 local function buildBot(position)
 	local model = Instance.new("Model")
 	model.Name = "Bot"
@@ -135,26 +156,39 @@ local function buildBot(position)
 	hrp.CFrame = CFrame.new(position)
 	hrp.Parent = model
 
+	-- "gi" laranja (torso) com "camisa" azul por baixo (gola)
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
 	torso.Size = Vector3.new(2.2, 2.4, 1.2)
-	torso.Color = Color3.fromRGB(210, 60, 60)
+	torso.Color = Color3.fromRGB(255, 140, 35)
 	torso.Material = Enum.Material.SmoothPlastic
 	torso.Anchored = true
 	torso.CanCollide = false
 	torso.CFrame = hrp.CFrame
 	torso.Parent = model
 
+	local collar = Instance.new("Part")
+	collar.Name = "Collar"
+	collar.Size = Vector3.new(2.3, 0.55, 1.3)
+	collar.Color = Color3.fromRGB(40, 75, 160)
+	collar.Material = Enum.Material.SmoothPlastic
+	collar.Anchored = true
+	collar.CanCollide = false
+	collar.CFrame = hrp.CFrame * CFrame.new(0, 1.0, 0)
+	collar.Parent = model
+
 	local head = Instance.new("Part")
 	head.Name = "Head"
 	head.Shape = Enum.PartType.Ball
 	head.Size = Vector3.new(1.5, 1.5, 1.5)
-	head.Color = Color3.fromRGB(240, 90, 90)
+	head.Color = Color3.fromRGB(255, 206, 165)
 	head.Material = Enum.Material.SmoothPlastic
 	head.Anchored = true
 	head.CanCollide = false
 	head.CFrame = hrp.CFrame * CFrame.new(0, 1.7, 0)
 	head.Parent = model
+
+	addBotHair(model, head)
 
 	local humanoid = Instance.new("Humanoid")
 	humanoid.RigType = Enum.HumanoidRigType.R6
