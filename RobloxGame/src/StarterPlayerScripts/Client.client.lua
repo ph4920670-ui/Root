@@ -393,11 +393,18 @@ local function getAimDirection()
 	if not root then
 		return nil
 	end
-	if mouse.Target then
-		local dir = mouse.Hit.Position - root.Position
-		dir = Vector3.new(dir.X, 0, dir.Z)
-		if dir.Magnitude > 0.1 then
-			return dir.Unit
+	-- mira no ponto do chão (na altura do personagem) embaixo do cursor,
+	-- mesmo que não tenha nenhuma peça ali (resolve o "clico aqui e vai pra lá")
+	local ray = mouse.UnitRay
+	local origin, dirv = ray.Origin, ray.Direction
+	if math.abs(dirv.Y) > 1e-4 then
+		local t = (root.Position.Y - origin.Y) / dirv.Y
+		if t > 0 then
+			local hit = origin + dirv * t
+			local d = Vector3.new(hit.X - root.Position.X, 0, hit.Z - root.Position.Z)
+			if d.Magnitude > 0.1 then
+				return d.Unit
+			end
 		end
 	end
 	local look = root.CFrame.LookVector
