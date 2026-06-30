@@ -20,7 +20,20 @@ local Net = require(Shared.Net)
 
 local DataManager = {}
 
-local store = DataStoreService:GetDataStore("BrawlArena_v1")
+-- GetDataStore pode dar erro em jogos não publicados / sem API Services.
+-- Protegemos com pcall: se falhar, o jogo roda normalmente, só não salva.
+local store
+do
+	local ok, result = pcall(function()
+		return DataStoreService:GetDataStore("BrawlArena_v1")
+	end)
+	if ok then
+		store = result
+	else
+		warn("[DataManager] DataStore indisponível — rodando sem salvar progresso. (Publique o jogo e ligue API Services pra salvar.)")
+	end
+end
+
 local cache = {}                  -- [player] = data
 local syncEvent = Net.Event("Sync")
 
@@ -53,15 +66,17 @@ end
 
 function DataManager.Load(player)
 	local data
-	local ok, result = pcall(function()
-		return store:GetAsync("p_" .. player.UserId)
-	end)
-	if ok and result then
-		data = reconcile(result)
-	else
-		if not ok then
+	if store then
+		local ok, result = pcall(function()
+			return store:GetAsync("p_" .. player.UserId)
+		end)
+		if ok and result then
+			data = reconcile(result)
+		elseif not ok then
 			warn("[DataManager] Falha ao carregar (usando padrão):", result)
 		end
+	end
+	if not data then
 		data = defaultData()
 	end
 	cache[player] = data
@@ -71,7 +86,7 @@ end
 
 function DataManager.Save(player)
 	local data = cache[player]
-	if not data then
+	if not data or not store then
 		return
 	end
 	local ok, err = pcall(function()
