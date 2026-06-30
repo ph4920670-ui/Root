@@ -27,6 +27,7 @@ local syncEvent = Net.Event("Sync")
 local matchEvent = Net.Event("Match")
 local notifyEvent = Net.Event("Notify")
 local fxEvent = Net.Event("AttackFX")
+local hitEvent = Net.Event("Hit")
 
 local myData = { Coins = 0, Owned = {}, Selected = "Shelly" }
 local superCooldownUntil = 0
@@ -502,6 +503,62 @@ fxEvent.OnClientEvent:Connect(function(origin, direction, range, color)
 		CFrame = CFrame.new(origin + direction * 2),
 	}, workspace)
 	Debris:AddItem(flash, 0.08)
+end)
+
+-- impacto + número de dano quando alguém é atingido
+hitEvent.OnClientEvent:Connect(function(position, damage, color)
+	-- faísca de impacto
+	local spark = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Shape = Enum.PartType.Ball,
+		Material = Enum.Material.Neon,
+		Color = color,
+		Size = Vector3.new(1.6, 1.6, 1.6),
+		CFrame = CFrame.new(position),
+	}, workspace)
+	task.spawn(function()
+		for i = 1, 5 do
+			spark.Size = spark.Size + Vector3.new(0.5, 0.5, 0.5)
+			spark.Transparency = i / 5
+			task.wait(0.02)
+		end
+		spark:Destroy()
+	end)
+
+	-- número de dano subindo
+	local holder = make("Part", {
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Transparency = 1,
+		Size = Vector3.new(0.2, 0.2, 0.2),
+		CFrame = CFrame.new(position + Vector3.new(math.random(-10, 10) / 10, 2, 0)),
+	}, workspace)
+	local bb = make("BillboardGui", {
+		Size = UDim2.new(0, 80, 0, 40),
+		AlwaysOnTop = true,
+		Adornee = holder,
+	}, holder)
+	local dmgLabel = make("TextLabel", {
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 26,
+		TextColor3 = Color3.fromRGB(255, 230, 120),
+		TextStrokeTransparency = 0.2,
+		Text = "-" .. math.floor(damage),
+	}, bb)
+	task.spawn(function()
+		for i = 1, 14 do
+			holder.CFrame = holder.CFrame + Vector3.new(0, 0.18, 0)
+			dmgLabel.TextTransparency = i / 14
+			dmgLabel.TextStrokeTransparency = 0.2 + (i / 14) * 0.8
+			task.wait(0.03)
+		end
+		holder:Destroy()
+	end)
 end)
 
 -- ===================================================================

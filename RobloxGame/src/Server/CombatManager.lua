@@ -1,11 +1,7 @@
 --[[
 	CombatManager (ModuleScript)
-	Cuida do combate de forma AUTORITATIVA (o servidor decide o dano, pra
-	evitar trapaça). O cliente só pede "atacar nessa direção".
-
-	Como funciona o tiro: a partir do jogador, acerta inimigos que estejam
-	dentro do ALCANCE e dentro do ângulo de ABERTURA (cone), desde que não
-	tenha obstáculo no meio.
+	Combate autoritativo. Acerta tanto JOGADORES quanto BOTS (modelos com
+	Humanoid dentro da pasta workspace.Enemies). Mostra números de dano.
 
 	Local no Studio: ServerScriptService > Server > CombatManager
 ]]
@@ -19,13 +15,14 @@ local Net = require(Shared.Net)
 
 local CombatManager = {}
 
-local nextAttack = {}   -- [player] = tempo (os) em que pode atacar de novo
-local nextSpecial = {}  -- [player] = tempo (os) em que pode usar especial
-local lastAttacker = {} -- [player vítima] = player atacante
+local nextAttack = {}
+local nextSpecial = {}
+local lastAttacker = {} -- [character/model vítima] = player atacante
 
 local attackEvent = Net.Event("Attack")
 local specialEvent = Net.Event("Special")
 local fxEvent = Net.Event("AttackFX")
+local hitEvent = Net.Event("Hit")
 
 local function getAliveCharacter(player)
 	local char = player.Character
@@ -40,17 +37,38 @@ local function getAliveCharacter(player)
 	return nil
 end
 
+-- junta todos os alvos válidos (jogadores + bots), menos o atacante
+local function gatherTargets(attackerPlayer, attackerChar)
+	local targets = {}
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= attackerPlayer then
+			local c, h, r = getAliveCharacter(other)
+			if c then
+				table.insert(targets, { char = c, hum = h, root = r })
+			end
+		end
+	end
+	local folder = workspace:FindFirstChild("Enemies")
+	if folder then
+		for _, m in ipairs(folder:GetChildren()) do
+			local h = m:FindFirstChildOfClass("Humanoid")
+			local r = m:FindFirstChild("HumanoidRootPart")
+			if h and r and h.Health > 0 and m ~= attackerChar then
+				table.insert(targets, { char = m, hum = h, root = r })
+			end
+		end
+	end
+	return targets
+end
+
 local function hasLineOfSight(origin, attackerChar, targetChar, targetPos)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
-	-- ignora o atacante e o alvo: assim só obstáculos no meio bloqueiam
 	params.FilterDescendantsInstances = { attackerChar, targetChar }
 	local result = workspace:Raycast(origin, (targetPos - origin), params)
-	-- se bateu em algo (um obstáculo) antes do alvo, está bloqueado
 	return result == nil
 end
 
--- Aplica um "tiro em cone" e retorna quantos inimigos acertou
 local function fireCone(player, direction, damage, range, spreadDeg)
 	local attackerChar, _, attackerRoot = getAliveCharacter(player)
 	if not attackerChar then
@@ -64,40 +82,36 @@ local function fireCone(player, direction, damage, range, spreadDeg)
 	end
 	direction = direction.Unit
 
+	local brawlerName = attackerChar:GetAttribute("Brawler")
+	local color = Brawlers[brawlerName] and Brawlers[brawlerName].Color or Color3.new(1, 1, 1)
 	local spreadRad = math.rad(spreadDeg)
 
-	for _, other in ipairs(Players:GetPlayers()) do
-		if other ~= player then
-			local otherChar, otherHum, otherRoot = getAliveCharacter(other)
-			if otherChar and not otherChar:FindFirstChildOfClass("ForceField") then
-				local toTarget = otherRoot.Position - origin
-				local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
-				local dist = flat.Magnitude
-				if dist <= range and dist > 0.01 then
-					local angle = math.acos(math.clamp(direction:Dot(flat.Unit), -1, 1))
-					if angle <= spreadRad then
-						if hasLineOfSight(origin, attackerChar, otherChar, otherRoot.Position) then
-							lastAttacker[other] = player
-							otherHum:TakeDamage(damage)
-						end
+	for _, t in ipairs(gatherTargets(player, attackerChar)) do
+		if not t.char:FindFirstChildOfClass("ForceField") then
+			local flat = Vector3.new(t.root.Position.X - origin.X, 0, t.root.Position.Z - origin.Z)
+			local dist = flat.Magnitude
+			if dist <= range and dist > 0.01 then
+				local angle = math.acos(math.clamp(direction:Dot(flat.Unit), -1, 1))
+				if angle <= spreadRad then
+					if hasLineOfSight(origin, attackerChar, t.char, t.root.Position) then
+						lastAttacker[t.char] = player
+						t.hum:TakeDamage(damage)
+						hitEvent:FireAllClients(t.root.Position, damage, color)
 					end
 				end
 			end
 		end
 	end
 
-	-- avisa todos os clientes pra desenharem o traçado do tiro
-	local brawlerName = attackerChar:GetAttribute("Brawler")
-	local color = Brawlers[brawlerName] and Brawlers[brawlerName].Color or Color3.new(1, 1, 1)
 	fxEvent:FireAllClients(origin, direction, range, color)
 end
 
-function CombatManager.GetLastAttacker(player)
-	return lastAttacker[player]
+function CombatManager.GetLastAttacker(character)
+	return lastAttacker[character]
 end
 
-function CombatManager.ClearLastAttacker(player)
-	lastAttacker[player] = nil
+function CombatManager.ClearLastAttacker(character)
+	lastAttacker[character] = nil
 end
 
 function CombatManager.Init()
@@ -109,8 +123,7 @@ function CombatManager.Init()
 		if not char then
 			return
 		end
-		local brawlerName = char:GetAttribute("Brawler")
-		local b = Brawlers[brawlerName]
+		local b = Brawlers[char:GetAttribute("Brawler")]
 		if not b then
 			return
 		end
@@ -130,8 +143,7 @@ function CombatManager.Init()
 		if not char then
 			return
 		end
-		local brawlerName = char:GetAttribute("Brawler")
-		local b = Brawlers[brawlerName]
+		local b = Brawlers[char:GetAttribute("Brawler")]
 		if not b or not b.Special then
 			return
 		end
@@ -146,8 +158,6 @@ function CombatManager.Init()
 	Players.PlayerRemoving:Connect(function(player)
 		nextAttack[player] = nil
 		nextSpecial[player] = nil
-		lastAttacker[player] = nil
-		-- remove referências como atacante de outros
 		for victim, attacker in pairs(lastAttacker) do
 			if attacker == player then
 				lastAttacker[victim] = nil
