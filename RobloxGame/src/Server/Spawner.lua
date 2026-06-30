@@ -97,6 +97,23 @@ local function addHeadband(character, head, color)
 	weld2.Parent = plate
 end
 
+-- máscara (cobre a metade de baixo do rosto, estilo ninja sorrateiro)
+local function addMask(character, head, color)
+	local mask = Instance.new("Part")
+	mask.Name = "Mask"
+	mask.Size = Vector3.new(head.Size.X + 0.1, head.Size.Y * 0.55, head.Size.Z + 0.1)
+	mask.Color = color
+	mask.Material = Enum.Material.SmoothPlastic
+	mask.CanCollide = false
+	mask.Massless = true
+	mask.CFrame = head.CFrame * CFrame.new(0, -head.Size.Y * 0.22, 0)
+	mask.Parent = character
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = mask
+	weld.Part1 = head
+	weld.Parent = mask
+end
+
 local function applySkin(character, skin)
 	if not skin then
 		return
@@ -142,6 +159,10 @@ local function applySkin(character, skin)
 
 	if skin.Hair then
 		addHairSpikes(character, head, skin.HairColor or Color3.fromRGB(20, 20, 20), skin.HairCount)
+	end
+
+	if skin.Mask then
+		addMask(character, head, skin.MaskColor or Color3.fromRGB(40, 40, 45))
 	end
 end
 

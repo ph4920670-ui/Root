@@ -96,6 +96,56 @@ local Brawlers = {
 			Scale = 1.0,
 		},
 	},
+
+	-- lutadora corpo a corpo: dano altíssimo bem de perto, cabelo rosa
+	Punho = {
+		DisplayName = "Punho",
+		Price = 450,
+		Health = 92,
+		WalkSpeed = 17,
+		Damage = 30,
+		Range = 14,
+		Spread = 50,
+		ReloadTime = 0.55,
+		Color = Color3.fromRGB(255, 110, 150),
+		Special = { Damage = 55, Range = 18, Spread = 75, Cooldown = 9 },
+		Skin = { Hair = true, HairColor = Color3.fromRGB(255, 140, 190), Scale = 1.0 },
+	},
+
+	-- controladora de área: especial atinge tudo ao redor, cabelo vermelho
+	Areia = {
+		DisplayName = "Areia",
+		Price = 750,
+		Health = 95,
+		WalkSpeed = 15,
+		Damage = 14,
+		Range = 40,
+		Spread = 16,
+		ReloadTime = 0.6,
+		Color = Color3.fromRGB(200, 90, 50),
+		Special = { Damage = 26, Range = 30, Spread = 360, Cooldown = 13 },
+		Skin = { Hair = true, HairColor = Color3.fromRGB(180, 40, 40), Scale = 1.05 },
+	},
+
+	-- atiradora precisa e sorrateira: máscara + bandana, cabelo prata
+	Sombra = {
+		DisplayName = "Sombra",
+		Price = 850,
+		Health = 75,
+		WalkSpeed = 16,
+		Damage = 34,
+		Range = 75,
+		Spread = 2,
+		ReloadTime = 1.0,
+		Color = Color3.fromRGB(70, 70, 80),
+		Special = { Damage = 48, Range = 80, Spread = 2, Cooldown = 10 },
+		Skin = {
+			Hat = "Headband", HatColor = Color3.fromRGB(50, 50, 55),
+			Hair = true, HairColor = Color3.fromRGB(190, 190, 195),
+			Mask = true, MaskColor = Color3.fromRGB(40, 40, 45),
+			Scale = 1.0,
+		},
+	},
 }
 
 return Brawlers
