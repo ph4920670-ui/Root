@@ -370,6 +370,14 @@ local function runMatch()
 	matchActive = true
 
 	currentMapDef = Maps[math.random(1, #Maps)]
+	if GameConfig.ForceMap then
+		for _, m in ipairs(Maps) do
+			if m.Name == GameConfig.ForceMap then
+				currentMapDef = m
+				break
+			end
+		end
+	end
 	currentMap = MapGenerator.Build(currentMapDef)
 
 	scores = {}

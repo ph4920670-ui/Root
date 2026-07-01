@@ -21,6 +21,11 @@ local GameConfig = {
 
 	-- ====== BRAWLERS INICIAIS ======
 	StartingBrawlers = { "Shelly" }, -- brawlers que todo mundo já começa tendo
+
+	-- ====== TESTES ======
+	-- Para sempre cair num mapa específico (útil pra testar), coloque o nome
+	-- exato daqui, ex: ForceMap = "Vila Ninja". Deixe nil pra sortear normal.
+	ForceMap = "Vila Ninja",
 }
 
 return GameConfig
