@@ -16,7 +16,8 @@ Players.CharacterAutoLoads = false
 -- VISUAL: iluminação + atmosfera bonitas (tira o cinza padrão)
 -- ===================================================================
 local function setupScene()
-	Lighting.Technology = Enum.Technology.Future -- Future Lighting (sombras/reflexos melhores)
+	-- Lighting.Technology (Future Lighting) não pode ser definido por script
+	-- (só manualmente no Studio, por restrição do Roblox). Ver README.
 	Lighting.ClockTime = 14.5
 	Lighting.Brightness = 2.6
 	Lighting.Ambient = Color3.fromRGB(70, 70, 85)
