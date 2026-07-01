@@ -197,34 +197,98 @@ local brawlerLabel = make("TextLabel", {
 }, topBar)
 
 local matchLabel = make("TextLabel", {
-	Size = UDim2.new(0, 380, 0, 30),
-	Position = UDim2.new(0.5, -190, 0, 62),
+	Size = UDim2.new(0, 440, 0, 30),
+	Position = UDim2.new(0.5, -220, 0, 62),
 	BackgroundColor3 = Color3.fromRGB(20, 22, 30),
 	BackgroundTransparency = 0.25,
 	Font = Enum.Font.GothamBold,
-	TextSize = 18,
+	TextSize = 17,
 	TextColor3 = Color3.fromRGB(190, 235, 255),
 	Text = "Aguardando...",
 }, gui)
 corner(matchLabel, 10)
 stroke(matchLabel, Color3.fromRGB(120, 180, 255), 1.2, 0.5)
 
--- Placar
-local scoreFrame = make("TextLabel", {
-	Size = UDim2.new(0, 230, 0, 130),
+-- Placar (lista de linhas, não texto cru)
+local scorePanel = make("Frame", {
+	Size = UDim2.new(0, 230, 0, 34),
 	Position = UDim2.new(1, -242, 0, 96),
 	BackgroundColor3 = Color3.fromRGB(20, 22, 30),
-	BackgroundTransparency = 0.25,
-	Font = Enum.Font.GothamMedium,
-	TextSize = 16,
-	TextColor3 = Color3.fromRGB(235, 235, 235),
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextYAlignment = Enum.TextYAlignment.Top,
-	Text = "",
+	BackgroundTransparency = 0.2,
+	AutomaticSize = Enum.AutomaticSize.Y,
 }, gui)
-corner(scoreFrame, 10)
-stroke(scoreFrame, Color3.fromRGB(60, 65, 85), 1, 0.4)
-make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingTop = UDim.new(0, 8) }, scoreFrame)
+corner(scorePanel, 12)
+stroke(scorePanel, Color3.fromRGB(90, 120, 255), 1.2, 0.55)
+gradient(scorePanel, Color3.fromRGB(30, 33, 46), Color3.fromRGB(18, 20, 28))
+
+local scoreTitle = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 26),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	TextSize = 15,
+	TextColor3 = Color3.fromRGB(255, 215, 90),
+	Text = "🏅 PLACAR",
+}, scorePanel)
+
+local scoreList = make("Frame", {
+	Size = UDim2.new(1, -12, 0, 0),
+	Position = UDim2.new(0, 6, 0, 28),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+}, scorePanel)
+make("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, scoreList)
+make("UIPadding", { PaddingBottom = UDim.new(0, 8) }, scoreList)
+
+local MEDALS = { "🥇", "🥈", "🥉" }
+
+local function refreshScoreboard(scores)
+	for _, child in ipairs(scoreList:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	for i, entry in ipairs(scores or {}) do
+		if i > 5 then
+			break
+		end
+		local row = make("Frame", {
+			Size = UDim2.new(1, 0, 0, 22),
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = (i == 1) and 0.86 or 0.95,
+			LayoutOrder = i,
+		}, scoreList)
+		corner(row, 6)
+		make("TextLabel", {
+			Size = UDim2.new(0, 26, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			Text = MEDALS[i] or (i .. "."),
+		}, row)
+		make("TextLabel", {
+			Size = UDim2.new(1, -74, 1, 0),
+			Position = UDim2.new(0, 26, 0, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(230, 230, 230),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Text = entry.Name,
+		}, row)
+		make("TextLabel", {
+			Size = UDim2.new(0, 40, 1, 0),
+			Position = UDim2.new(1, -44, 0, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(255, 215, 90),
+			TextXAlignment = Enum.TextXAlignment.Right,
+			Text = tostring(entry.Kills),
+		}, row)
+	end
+end
 
 -- Barra de VIDA
 local healthBg = make("Frame", {
@@ -787,10 +851,11 @@ end)
 
 matchEvent.OnClientEvent:Connect(function(state)
 	currentPhase = state.Phase
+	local playerCount = #(state.Scores or {})
 	if state.Phase == "COUNTDOWN" then
-		matchLabel.Text = "⚔️ Começa em " .. (state.Countdown or "?") .. "s..."
+		matchLabel.Text = "⚔️ Começa em " .. (state.Countdown or "?") .. "s...   👥 " .. #Players:GetPlayers()
 	elseif state.Phase == "MATCH" then
-		matchLabel.Text = "🗺️ " .. state.MapName .. "   ⏱️ " .. state.TimeLeft .. "s   🎯 " .. state.KillsToWin
+		matchLabel.Text = "🗺️ " .. state.MapName .. "   ⏱️ " .. state.TimeLeft .. "s   🎯 " .. state.KillsToWin .. "   👥 " .. playerCount
 	else
 		matchLabel.Text = state.Winner and ("🏆 Vencedor: " .. state.Winner) or "🏠 No lobby — aguardando..."
 	end
@@ -808,15 +873,7 @@ matchEvent.OnClientEvent:Connect(function(state)
 		showResult(state.Winner)
 	end
 
-	local txt = "🏅 PLACAR\n"
-	local medals = { "🥇", "🥈", "🥉" }
-	for i, entry in ipairs(state.Scores or {}) do
-		txt ..= (medals[i] or (i .. ".")) .. " " .. entry.Name .. " — " .. entry.Kills .. "\n"
-		if i >= 5 then
-			break
-		end
-	end
-	scoreFrame.Text = txt
+	refreshScoreboard(state.Scores)
 end)
 
 local toastTween

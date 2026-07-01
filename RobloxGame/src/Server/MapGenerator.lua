@@ -129,17 +129,40 @@ local function buildTemple(model, t)
 		pillar.CastShadow = true
 	end
 
-	-- telhado grande (duas águas)
-	local eaveY = 1.4 + height
-	local ridgeRise = height * 0.6
-	local halfRun = w / 2 + 1.6
-	local ridgeRun = d + 3
-	local ridgePoint = pos + Vector3.new(0, eaveY + ridgeRise, 0)
+	-- telhado nível 1 (maior, base do pagode)
+	local eaveY1 = 1.4 + height
+	local ridgeRise1 = height * 0.5
+	local halfRun1 = w / 2 + 1.6
+	local ridgeRun1 = d + 3
+	local ridgePoint1 = pos + Vector3.new(0, eaveY1 + ridgeRise1, 0)
 	for _, sx in ipairs({ 1, -1 }) do
-		local eavePoint = pos + Vector3.new(sx * halfRun, eaveY, 0)
-		slopedPanel("TempleRoof", eavePoint, ridgePoint, ridgeRun, 0.5, roofColor, Enum.Material.SmoothPlastic, model)
+		local eavePoint = pos + Vector3.new(sx * halfRun1, eaveY1, 0)
+		slopedPanel("TempleRoof1", eavePoint, ridgePoint1, ridgeRun1, 0.5, roofColor, Enum.Material.SmoothPlastic, model)
 	end
-	makePart("TempleRidge", Vector3.new(0.6, 0.6, ridgeRun), ridgePoint, Color3.fromRGB(90, 60, 40), Enum.Material.Wood, model)
+	makePart("TempleRidge1", Vector3.new(0.6, 0.6, ridgeRun1), ridgePoint1, Color3.fromRGB(90, 60, 40), Enum.Material.Wood, model)
+
+	-- 2º andar, menor, sentado sobre o telhado 1 (silhueta de pagode)
+	local w2, d2, h2 = w * 0.55, d * 0.55, height * 0.55
+	local floor2Y = ridgePoint1.Y + 0.4
+	local body2 = makePart("TempleBody2", Vector3.new(w2, h2, d2), pos + Vector3.new(0, floor2Y + h2 / 2, 0),
+		wallColor, Enum.Material.SmoothPlastic, model)
+	body2.CastShadow = true
+
+	-- telhado nível 2 (menor, no topo)
+	local eaveY2 = floor2Y + h2
+	local ridgeRise2 = h2 * 0.6
+	local halfRun2 = w2 / 2 + 1.0
+	local ridgeRun2 = d2 + 2
+	local ridgePoint2 = pos + Vector3.new(0, eaveY2 + ridgeRise2, 0)
+	for _, sx in ipairs({ 1, -1 }) do
+		local eavePoint = pos + Vector3.new(sx * halfRun2, eaveY2, 0)
+		slopedPanel("TempleRoof2", eavePoint, ridgePoint2, ridgeRun2, 0.4, roofColor, Enum.Material.SmoothPlastic, model)
+	end
+	makePart("TempleRidge2", Vector3.new(0.5, 0.5, ridgeRun2), ridgePoint2, Color3.fromRGB(90, 60, 40), Enum.Material.Wood, model)
+
+	-- pináculo decorativo no topo
+	makePart("TempleFinial", Vector3.new(0.8, 1.8, 0.8), ridgePoint2 + Vector3.new(0, 1.1, 0),
+		Color3.fromRGB(230, 200, 110), Enum.Material.Metal, model)
 
 	-- escadaria de entrada
 	for i = 1, 6 do
@@ -268,6 +291,43 @@ local function buildSign(model, sg, i)
 	label.Parent = sgui
 end
 
+-- torii (portão japonês tradicional: 2 pilares + viga larga no topo)
+local function buildToriiGate(model, g)
+	local gp = g.Pos
+	local red = Color3.fromRGB(200, 50, 40)
+	local pillarH = 13
+	local spread = 8
+
+	for _, sx in ipairs({ 1, -1 }) do
+		local pillar = makePart("ToriiPillar", Vector3.new(2.2, pillarH, 2.2), gp + Vector3.new(sx * spread, pillarH / 2, 0),
+			red, Enum.Material.SmoothPlastic, model)
+		pillar.Shape = Enum.PartType.Cylinder
+		pillar.CFrame = CFrame.new(gp + Vector3.new(sx * spread, pillarH / 2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		pillar.CastShadow = true
+	end
+
+	-- viga inferior reta (nakajuku), conecta os pilares
+	makePart("ToriiLowerBeam", Vector3.new(spread * 2 - 2, 1.1, 1.6), gp + Vector3.new(0, pillarH * 0.62, 0),
+		red, Enum.Material.SmoothPlastic, model)
+
+	-- viga superior larga (kasagi), ultrapassando os pilares
+	local kasagiLen = spread * 2 + 6
+	makePart("ToriiKasagi", Vector3.new(kasagiLen, 1.3, 2.6), gp + Vector3.new(0, pillarH + 0.8, 0),
+		red, Enum.Material.SmoothPlastic, model)
+
+	-- pontas levemente viradas pra cima, pra sugerir a curva tradicional
+	for _, sx in ipairs({ 1, -1 }) do
+		local tip = makePart("ToriiKasagiTip", Vector3.new(3, 1.1, 2.4), gp + Vector3.new(sx * (kasagiLen / 2), pillarH + 1.6, 0),
+			red, Enum.Material.SmoothPlastic, model)
+		tip.CFrame = CFrame.new(gp + Vector3.new(sx * (kasagiLen / 2), pillarH + 1.6, 0)) * CFrame.Angles(0, 0, math.rad(-sx * 18))
+		tip.CastShadow = true
+	end
+
+	-- viga secundária (shimaki) logo abaixo do kasagi
+	makePart("ToriiShimaki", Vector3.new(kasagiLen - 3, 0.7, 1.9), gp + Vector3.new(0, pillarH + 0.1, 0),
+		Color3.fromRGB(235, 230, 215), Enum.Material.SmoothPlastic, model)
+end
+
 local function buildBambooCluster(model, cluster, ci)
 	local count = cluster.Count or 6
 	local radius = cluster.Radius or 2.5
@@ -304,6 +364,23 @@ local function buildMountainBackdrop(model, mapDef)
 	end
 end
 
+-- rua de pedra ligando dois pontos (caminho principal da vila)
+local function buildStreet(model, s, i)
+	local from, to = s.From, s.To
+	local width = s.Width or 6
+	local len = (to - from).Magnitude
+	local mid = (from + to) / 2
+	local strip = Instance.new("Part")
+	strip.Name = "Street" .. i
+	strip.Anchored = true
+	strip.CanCollide = false
+	strip.Material = Enum.Material.Slate
+	strip.Color = Color3.fromRGB(150, 145, 135)
+	strip.Size = Vector3.new(width, 0.15, len)
+	strip.CFrame = CFrame.lookAt(mid, to) + Vector3.new(0, 0.08, 0)
+	strip.Parent = model
+end
+
 -- arbustos, pedrinhas e flores espalhados pra não deixar canto vazio
 local function scatterDecor(model, mapDef)
 	local rng = Random.new(20240501)
@@ -322,10 +399,20 @@ local function scatterDecor(model, mapDef)
 			local rock = makePart("Rock" .. i, Vector3.new(1.2 + rng:NextNumber(0, 1), 0.9, 1.1), Vector3.new(x, 0.5, z), Color3.fromRGB(130, 128, 124), Enum.Material.Rock, model)
 			rock.CanCollide = false
 		else
-			local flower = makePart("Flower" .. i, Vector3.new(0.4, 0.4, 0.4), Vector3.new(x, 0.3, z),
-				Color3.fromRGB(rng:NextInteger(200, 255), rng:NextInteger(60, 160), rng:NextInteger(120, 200)), Enum.Material.Neon, model)
-			flower.Shape = Enum.PartType.Ball
-			flower.CanCollide = false
+			-- pequeno grupo de florzinhas (fosco, sem brilho) em vez de uma bola solta
+			local palette = {
+				Color3.fromRGB(235, 120, 140), Color3.fromRGB(250, 210, 90),
+				Color3.fromRGB(245, 245, 240), Color3.fromRGB(220, 140, 200),
+			}
+			local fcolor = palette[rng:NextInteger(1, #palette)]
+			for k = 1, 3 do
+				local fx = x + rng:NextNumber(-0.5, 0.5)
+				local fz = z + rng:NextNumber(-0.5, 0.5)
+				local flower = makePart("Flower" .. i .. "_" .. k, Vector3.new(0.35, 0.35, 0.35), Vector3.new(fx, 0.2, fz),
+					fcolor, Enum.Material.SmoothPlastic, model)
+				flower.Shape = Enum.PartType.Ball
+				flower.CanCollide = false
+			end
 		end
 	end
 end
@@ -515,11 +602,7 @@ function MapGenerator.Build(mapDef)
 		end
 
 		if mapDef.Gate then
-			local gp = mapDef.Gate.Pos
-			makePart("GatePillarL", Vector3.new(2, 12, 2), gp + Vector3.new(-7, 6, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
-			makePart("GatePillarR", Vector3.new(2, 12, 2), gp + Vector3.new(7, 6, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
-			makePart("GateBeam", Vector3.new(18, 1.4, 2), gp + Vector3.new(0, 12, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
-			makePart("GateBeam2", Vector3.new(20, 1, 2.4), gp + Vector3.new(0, 10, 0), Color3.fromRGB(200, 80, 60), Enum.Material.Wood, model)
+			buildToriiGate(model, mapDef.Gate)
 		end
 
 		if mapDef.Arena then
@@ -554,6 +637,10 @@ function MapGenerator.Build(mapDef)
 
 		for i, sg in ipairs(mapDef.Signs or {}) do
 			buildSign(model, sg, i)
+		end
+
+		for i, s in ipairs(mapDef.Streets or {}) do
+			buildStreet(model, s, i)
 		end
 
 		buildMountainBackdrop(model, mapDef)

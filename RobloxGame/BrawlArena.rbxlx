@@ -282,9 +282,9 @@ local Maps = {
 		Name = "Vila Ninja",
 		Theme = "Village",
 		Size = Vector3.new(150, 1, 150),
-		FloorColor = Color3.fromRGB(195, 165, 110),
+		FloorColor = Color3.fromRGB(125, 160, 85),
 		ObstacleColor = Color3.fromRGB(150, 115, 70),
-		Material = Enum.Material.Ground,
+		Material = Enum.Material.Grass,
 		Obstacles = {},
 		SpawnPoints = {
 			Vector3.new(-65, 4, -65), Vector3.new(65, 4, -65),
@@ -398,6 +398,13 @@ local Maps = {
 		},
 
 		DecorDensity = 55,
+
+		-- ruas de pedra ligando portão -> praça -> templo -> ponte
+		Streets = {
+			{ From = Vector3.new(0, 0, 64), To = Vector3.new(0, 0, 28), Width = 9 },
+			{ From = Vector3.new(0, 0, 28), To = Vector3.new(0, 0, 0),  Width = 9 },
+			{ From = Vector3.new(0, 0, 0),  To = Vector3.new(0, 0, -36), Width = 7 },
+		},
 	},
 }
 
@@ -471,10 +478,10 @@ Players.CharacterAutoLoads = false
 local function setupScene()
 	-- Lighting.Technology (Future Lighting) não pode ser definido por script
 	-- (só manualmente no Studio, por restrição do Roblox). Ver README.
-	Lighting.ClockTime = 14.5
-	Lighting.Brightness = 2.6
-	Lighting.Ambient = Color3.fromRGB(70, 70, 85)
-	Lighting.OutdoorAmbient = Color3.fromRGB(125, 130, 150)
+	Lighting.ClockTime = 17.3 -- golden hour (luz quente e mais dramática)
+	Lighting.Brightness = 2.8
+	Lighting.Ambient = Color3.fromRGB(80, 72, 78)
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 130, 130)
 	Lighting.EnvironmentDiffuseScale = 0.45
 	Lighting.EnvironmentSpecularScale = 0.45
 	Lighting.GeographicLatitude = 25
@@ -492,30 +499,31 @@ local function setupScene()
 	atmo.Name = "BA_Atmosphere"
 	atmo.Density = 0.32
 	atmo.Offset = 0.2
-	atmo.Color = Color3.fromRGB(199, 215, 230)
-	atmo.Decay = Color3.fromRGB(106, 112, 125)
-	atmo.Glare = 0.15
+	atmo.Color = Color3.fromRGB(255, 220, 190) -- tom quente (golden hour)
+	atmo.Decay = Color3.fromRGB(150, 110, 100)
+	atmo.Glare = 0.2
 	atmo.Haze = 1.4
 	atmo.Parent = Lighting
 
 	local bloom = Instance.new("BloomEffect")
 	bloom.Name = "BA_Bloom"
-	bloom.Intensity = 0.7
+	bloom.Intensity = 0.75
 	bloom.Size = 24
-	bloom.Threshold = 1.1
+	bloom.Threshold = 1.05
 	bloom.Parent = Lighting
 
 	local cc = Instance.new("ColorCorrectionEffect")
 	cc.Name = "BA_Color"
-	cc.Saturation = 0.18
+	cc.Saturation = 0.2
 	cc.Contrast = 0.1
 	cc.Brightness = 0.02
+	cc.TintColor = Color3.fromRGB(255, 236, 214) -- leve tom dourado geral
 	cc.Parent = Lighting
 
 	local sun = Instance.new("SunRaysEffect")
 	sun.Name = "BA_Sun"
-	sun.Intensity = 0.12
-	sun.Spread = 0.6
+	sun.Intensity = 0.18
+	sun.Spread = 0.65
 	sun.Parent = Lighting
 
 	local sky = Instance.new("Sky")
@@ -1389,17 +1397,40 @@ local function buildTemple(model, t)
 		pillar.CastShadow = true
 	end
 
-	-- telhado grande (duas águas)
-	local eaveY = 1.4 + height
-	local ridgeRise = height * 0.6
-	local halfRun = w / 2 + 1.6
-	local ridgeRun = d + 3
-	local ridgePoint = pos + Vector3.new(0, eaveY + ridgeRise, 0)
+	-- telhado nível 1 (maior, base do pagode)
+	local eaveY1 = 1.4 + height
+	local ridgeRise1 = height * 0.5
+	local halfRun1 = w / 2 + 1.6
+	local ridgeRun1 = d + 3
+	local ridgePoint1 = pos + Vector3.new(0, eaveY1 + ridgeRise1, 0)
 	for _, sx in ipairs({ 1, -1 }) do
-		local eavePoint = pos + Vector3.new(sx * halfRun, eaveY, 0)
-		slopedPanel("TempleRoof", eavePoint, ridgePoint, ridgeRun, 0.5, roofColor, Enum.Material.SmoothPlastic, model)
+		local eavePoint = pos + Vector3.new(sx * halfRun1, eaveY1, 0)
+		slopedPanel("TempleRoof1", eavePoint, ridgePoint1, ridgeRun1, 0.5, roofColor, Enum.Material.SmoothPlastic, model)
 	end
-	makePart("TempleRidge", Vector3.new(0.6, 0.6, ridgeRun), ridgePoint, Color3.fromRGB(90, 60, 40), Enum.Material.Wood, model)
+	makePart("TempleRidge1", Vector3.new(0.6, 0.6, ridgeRun1), ridgePoint1, Color3.fromRGB(90, 60, 40), Enum.Material.Wood, model)
+
+	-- 2º andar, menor, sentado sobre o telhado 1 (silhueta de pagode)
+	local w2, d2, h2 = w * 0.55, d * 0.55, height * 0.55
+	local floor2Y = ridgePoint1.Y + 0.4
+	local body2 = makePart("TempleBody2", Vector3.new(w2, h2, d2), pos + Vector3.new(0, floor2Y + h2 / 2, 0),
+		wallColor, Enum.Material.SmoothPlastic, model)
+	body2.CastShadow = true
+
+	-- telhado nível 2 (menor, no topo)
+	local eaveY2 = floor2Y + h2
+	local ridgeRise2 = h2 * 0.6
+	local halfRun2 = w2 / 2 + 1.0
+	local ridgeRun2 = d2 + 2
+	local ridgePoint2 = pos + Vector3.new(0, eaveY2 + ridgeRise2, 0)
+	for _, sx in ipairs({ 1, -1 }) do
+		local eavePoint = pos + Vector3.new(sx * halfRun2, eaveY2, 0)
+		slopedPanel("TempleRoof2", eavePoint, ridgePoint2, ridgeRun2, 0.4, roofColor, Enum.Material.SmoothPlastic, model)
+	end
+	makePart("TempleRidge2", Vector3.new(0.5, 0.5, ridgeRun2), ridgePoint2, Color3.fromRGB(90, 60, 40), Enum.Material.Wood, model)
+
+	-- pináculo decorativo no topo
+	makePart("TempleFinial", Vector3.new(0.8, 1.8, 0.8), ridgePoint2 + Vector3.new(0, 1.1, 0),
+		Color3.fromRGB(230, 200, 110), Enum.Material.Metal, model)
 
 	-- escadaria de entrada
 	for i = 1, 6 do
@@ -1528,6 +1559,43 @@ local function buildSign(model, sg, i)
 	label.Parent = sgui
 end
 
+-- torii (portão japonês tradicional: 2 pilares + viga larga no topo)
+local function buildToriiGate(model, g)
+	local gp = g.Pos
+	local red = Color3.fromRGB(200, 50, 40)
+	local pillarH = 13
+	local spread = 8
+
+	for _, sx in ipairs({ 1, -1 }) do
+		local pillar = makePart("ToriiPillar", Vector3.new(2.2, pillarH, 2.2), gp + Vector3.new(sx * spread, pillarH / 2, 0),
+			red, Enum.Material.SmoothPlastic, model)
+		pillar.Shape = Enum.PartType.Cylinder
+		pillar.CFrame = CFrame.new(gp + Vector3.new(sx * spread, pillarH / 2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		pillar.CastShadow = true
+	end
+
+	-- viga inferior reta (nakajuku), conecta os pilares
+	makePart("ToriiLowerBeam", Vector3.new(spread * 2 - 2, 1.1, 1.6), gp + Vector3.new(0, pillarH * 0.62, 0),
+		red, Enum.Material.SmoothPlastic, model)
+
+	-- viga superior larga (kasagi), ultrapassando os pilares
+	local kasagiLen = spread * 2 + 6
+	makePart("ToriiKasagi", Vector3.new(kasagiLen, 1.3, 2.6), gp + Vector3.new(0, pillarH + 0.8, 0),
+		red, Enum.Material.SmoothPlastic, model)
+
+	-- pontas levemente viradas pra cima, pra sugerir a curva tradicional
+	for _, sx in ipairs({ 1, -1 }) do
+		local tip = makePart("ToriiKasagiTip", Vector3.new(3, 1.1, 2.4), gp + Vector3.new(sx * (kasagiLen / 2), pillarH + 1.6, 0),
+			red, Enum.Material.SmoothPlastic, model)
+		tip.CFrame = CFrame.new(gp + Vector3.new(sx * (kasagiLen / 2), pillarH + 1.6, 0)) * CFrame.Angles(0, 0, math.rad(-sx * 18))
+		tip.CastShadow = true
+	end
+
+	-- viga secundária (shimaki) logo abaixo do kasagi
+	makePart("ToriiShimaki", Vector3.new(kasagiLen - 3, 0.7, 1.9), gp + Vector3.new(0, pillarH + 0.1, 0),
+		Color3.fromRGB(235, 230, 215), Enum.Material.SmoothPlastic, model)
+end
+
 local function buildBambooCluster(model, cluster, ci)
 	local count = cluster.Count or 6
 	local radius = cluster.Radius or 2.5
@@ -1564,6 +1632,23 @@ local function buildMountainBackdrop(model, mapDef)
 	end
 end
 
+-- rua de pedra ligando dois pontos (caminho principal da vila)
+local function buildStreet(model, s, i)
+	local from, to = s.From, s.To
+	local width = s.Width or 6
+	local len = (to - from).Magnitude
+	local mid = (from + to) / 2
+	local strip = Instance.new("Part")
+	strip.Name = "Street" .. i
+	strip.Anchored = true
+	strip.CanCollide = false
+	strip.Material = Enum.Material.Slate
+	strip.Color = Color3.fromRGB(150, 145, 135)
+	strip.Size = Vector3.new(width, 0.15, len)
+	strip.CFrame = CFrame.lookAt(mid, to) + Vector3.new(0, 0.08, 0)
+	strip.Parent = model
+end
+
 -- arbustos, pedrinhas e flores espalhados pra não deixar canto vazio
 local function scatterDecor(model, mapDef)
 	local rng = Random.new(20240501)
@@ -1582,10 +1667,20 @@ local function scatterDecor(model, mapDef)
 			local rock = makePart("Rock" .. i, Vector3.new(1.2 + rng:NextNumber(0, 1), 0.9, 1.1), Vector3.new(x, 0.5, z), Color3.fromRGB(130, 128, 124), Enum.Material.Rock, model)
 			rock.CanCollide = false
 		else
-			local flower = makePart("Flower" .. i, Vector3.new(0.4, 0.4, 0.4), Vector3.new(x, 0.3, z),
-				Color3.fromRGB(rng:NextInteger(200, 255), rng:NextInteger(60, 160), rng:NextInteger(120, 200)), Enum.Material.Neon, model)
-			flower.Shape = Enum.PartType.Ball
-			flower.CanCollide = false
+			-- pequeno grupo de florzinhas (fosco, sem brilho) em vez de uma bola solta
+			local palette = {
+				Color3.fromRGB(235, 120, 140), Color3.fromRGB(250, 210, 90),
+				Color3.fromRGB(245, 245, 240), Color3.fromRGB(220, 140, 200),
+			}
+			local fcolor = palette[rng:NextInteger(1, #palette)]
+			for k = 1, 3 do
+				local fx = x + rng:NextNumber(-0.5, 0.5)
+				local fz = z + rng:NextNumber(-0.5, 0.5)
+				local flower = makePart("Flower" .. i .. "_" .. k, Vector3.new(0.35, 0.35, 0.35), Vector3.new(fx, 0.2, fz),
+					fcolor, Enum.Material.SmoothPlastic, model)
+				flower.Shape = Enum.PartType.Ball
+				flower.CanCollide = false
+			end
 		end
 	end
 end
@@ -1775,11 +1870,7 @@ function MapGenerator.Build(mapDef)
 		end
 
 		if mapDef.Gate then
-			local gp = mapDef.Gate.Pos
-			makePart("GatePillarL", Vector3.new(2, 12, 2), gp + Vector3.new(-7, 6, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
-			makePart("GatePillarR", Vector3.new(2, 12, 2), gp + Vector3.new(7, 6, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
-			makePart("GateBeam", Vector3.new(18, 1.4, 2), gp + Vector3.new(0, 12, 0), Color3.fromRGB(170, 60, 50), Enum.Material.Wood, model)
-			makePart("GateBeam2", Vector3.new(20, 1, 2.4), gp + Vector3.new(0, 10, 0), Color3.fromRGB(200, 80, 60), Enum.Material.Wood, model)
+			buildToriiGate(model, mapDef.Gate)
 		end
 
 		if mapDef.Arena then
@@ -1814,6 +1905,10 @@ function MapGenerator.Build(mapDef)
 
 		for i, sg in ipairs(mapDef.Signs or {}) do
 			buildSign(model, sg, i)
+		end
+
+		for i, s in ipairs(mapDef.Streets or {}) do
+			buildStreet(model, s, i)
 		end
 
 		buildMountainBackdrop(model, mapDef)
@@ -2481,34 +2576,98 @@ local brawlerLabel = make("TextLabel", {
 }, topBar)
 
 local matchLabel = make("TextLabel", {
-	Size = UDim2.new(0, 380, 0, 30),
-	Position = UDim2.new(0.5, -190, 0, 62),
+	Size = UDim2.new(0, 440, 0, 30),
+	Position = UDim2.new(0.5, -220, 0, 62),
 	BackgroundColor3 = Color3.fromRGB(20, 22, 30),
 	BackgroundTransparency = 0.25,
 	Font = Enum.Font.GothamBold,
-	TextSize = 18,
+	TextSize = 17,
 	TextColor3 = Color3.fromRGB(190, 235, 255),
 	Text = "Aguardando...",
 }, gui)
 corner(matchLabel, 10)
 stroke(matchLabel, Color3.fromRGB(120, 180, 255), 1.2, 0.5)
 
--- Placar
-local scoreFrame = make("TextLabel", {
-	Size = UDim2.new(0, 230, 0, 130),
+-- Placar (lista de linhas, não texto cru)
+local scorePanel = make("Frame", {
+	Size = UDim2.new(0, 230, 0, 34),
 	Position = UDim2.new(1, -242, 0, 96),
 	BackgroundColor3 = Color3.fromRGB(20, 22, 30),
-	BackgroundTransparency = 0.25,
-	Font = Enum.Font.GothamMedium,
-	TextSize = 16,
-	TextColor3 = Color3.fromRGB(235, 235, 235),
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextYAlignment = Enum.TextYAlignment.Top,
-	Text = "",
+	BackgroundTransparency = 0.2,
+	AutomaticSize = Enum.AutomaticSize.Y,
 }, gui)
-corner(scoreFrame, 10)
-stroke(scoreFrame, Color3.fromRGB(60, 65, 85), 1, 0.4)
-make("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingTop = UDim.new(0, 8) }, scoreFrame)
+corner(scorePanel, 12)
+stroke(scorePanel, Color3.fromRGB(90, 120, 255), 1.2, 0.55)
+gradient(scorePanel, Color3.fromRGB(30, 33, 46), Color3.fromRGB(18, 20, 28))
+
+local scoreTitle = make("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 26),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	TextSize = 15,
+	TextColor3 = Color3.fromRGB(255, 215, 90),
+	Text = "🏅 PLACAR",
+}, scorePanel)
+
+local scoreList = make("Frame", {
+	Size = UDim2.new(1, -12, 0, 0),
+	Position = UDim2.new(0, 6, 0, 28),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+}, scorePanel)
+make("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, scoreList)
+make("UIPadding", { PaddingBottom = UDim.new(0, 8) }, scoreList)
+
+local MEDALS = { "🥇", "🥈", "🥉" }
+
+local function refreshScoreboard(scores)
+	for _, child in ipairs(scoreList:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	for i, entry in ipairs(scores or {}) do
+		if i > 5 then
+			break
+		end
+		local row = make("Frame", {
+			Size = UDim2.new(1, 0, 0, 22),
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = (i == 1) and 0.86 or 0.95,
+			LayoutOrder = i,
+		}, scoreList)
+		corner(row, 6)
+		make("TextLabel", {
+			Size = UDim2.new(0, 26, 1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(255, 255, 255),
+			Text = MEDALS[i] or (i .. "."),
+		}, row)
+		make("TextLabel", {
+			Size = UDim2.new(1, -74, 1, 0),
+			Position = UDim2.new(0, 26, 0, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(230, 230, 230),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Text = entry.Name,
+		}, row)
+		make("TextLabel", {
+			Size = UDim2.new(0, 40, 1, 0),
+			Position = UDim2.new(1, -44, 0, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(255, 215, 90),
+			TextXAlignment = Enum.TextXAlignment.Right,
+			Text = tostring(entry.Kills),
+		}, row)
+	end
+end
 
 -- Barra de VIDA
 local healthBg = make("Frame", {
@@ -3071,10 +3230,11 @@ end)
 
 matchEvent.OnClientEvent:Connect(function(state)
 	currentPhase = state.Phase
+	local playerCount = #(state.Scores or {})
 	if state.Phase == "COUNTDOWN" then
-		matchLabel.Text = "⚔️ Começa em " .. (state.Countdown or "?") .. "s..."
+		matchLabel.Text = "⚔️ Começa em " .. (state.Countdown or "?") .. "s...   👥 " .. #Players:GetPlayers()
 	elseif state.Phase == "MATCH" then
-		matchLabel.Text = "🗺️ " .. state.MapName .. "   ⏱️ " .. state.TimeLeft .. "s   🎯 " .. state.KillsToWin
+		matchLabel.Text = "🗺️ " .. state.MapName .. "   ⏱️ " .. state.TimeLeft .. "s   🎯 " .. state.KillsToWin .. "   👥 " .. playerCount
 	else
 		matchLabel.Text = state.Winner and ("🏆 Vencedor: " .. state.Winner) or "🏠 No lobby — aguardando..."
 	end
@@ -3092,15 +3252,7 @@ matchEvent.OnClientEvent:Connect(function(state)
 		showResult(state.Winner)
 	end
 
-	local txt = "🏅 PLACAR\n"
-	local medals = { "🥇", "🥈", "🥉" }
-	for i, entry in ipairs(state.Scores or {}) do
-		txt ..= (medals[i] or (i .. ".")) .. " " .. entry.Name .. " — " .. entry.Kills .. "\n"
-		if i >= 5 then
-			break
-		end
-	end
-	scoreFrame.Text = txt
+	refreshScoreboard(state.Scores)
 end)
 
 local toastTween

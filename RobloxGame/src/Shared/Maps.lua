@@ -100,9 +100,9 @@ local Maps = {
 		Name = "Vila Ninja",
 		Theme = "Village",
 		Size = Vector3.new(150, 1, 150),
-		FloorColor = Color3.fromRGB(195, 165, 110),
+		FloorColor = Color3.fromRGB(125, 160, 85),
 		ObstacleColor = Color3.fromRGB(150, 115, 70),
-		Material = Enum.Material.Ground,
+		Material = Enum.Material.Grass,
 		Obstacles = {},
 		SpawnPoints = {
 			Vector3.new(-65, 4, -65), Vector3.new(65, 4, -65),
@@ -216,6 +216,13 @@ local Maps = {
 		},
 
 		DecorDensity = 55,
+
+		-- ruas de pedra ligando portão -> praça -> templo -> ponte
+		Streets = {
+			{ From = Vector3.new(0, 0, 64), To = Vector3.new(0, 0, 28), Width = 9 },
+			{ From = Vector3.new(0, 0, 28), To = Vector3.new(0, 0, 0),  Width = 9 },
+			{ From = Vector3.new(0, 0, 0),  To = Vector3.new(0, 0, -36), Width = 7 },
+		},
 	},
 }
 

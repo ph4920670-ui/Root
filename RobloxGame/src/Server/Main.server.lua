@@ -18,10 +18,10 @@ Players.CharacterAutoLoads = false
 local function setupScene()
 	-- Lighting.Technology (Future Lighting) não pode ser definido por script
 	-- (só manualmente no Studio, por restrição do Roblox). Ver README.
-	Lighting.ClockTime = 14.5
-	Lighting.Brightness = 2.6
-	Lighting.Ambient = Color3.fromRGB(70, 70, 85)
-	Lighting.OutdoorAmbient = Color3.fromRGB(125, 130, 150)
+	Lighting.ClockTime = 17.3 -- golden hour (luz quente e mais dramática)
+	Lighting.Brightness = 2.8
+	Lighting.Ambient = Color3.fromRGB(80, 72, 78)
+	Lighting.OutdoorAmbient = Color3.fromRGB(150, 130, 130)
 	Lighting.EnvironmentDiffuseScale = 0.45
 	Lighting.EnvironmentSpecularScale = 0.45
 	Lighting.GeographicLatitude = 25
@@ -39,30 +39,31 @@ local function setupScene()
 	atmo.Name = "BA_Atmosphere"
 	atmo.Density = 0.32
 	atmo.Offset = 0.2
-	atmo.Color = Color3.fromRGB(199, 215, 230)
-	atmo.Decay = Color3.fromRGB(106, 112, 125)
-	atmo.Glare = 0.15
+	atmo.Color = Color3.fromRGB(255, 220, 190) -- tom quente (golden hour)
+	atmo.Decay = Color3.fromRGB(150, 110, 100)
+	atmo.Glare = 0.2
 	atmo.Haze = 1.4
 	atmo.Parent = Lighting
 
 	local bloom = Instance.new("BloomEffect")
 	bloom.Name = "BA_Bloom"
-	bloom.Intensity = 0.7
+	bloom.Intensity = 0.75
 	bloom.Size = 24
-	bloom.Threshold = 1.1
+	bloom.Threshold = 1.05
 	bloom.Parent = Lighting
 
 	local cc = Instance.new("ColorCorrectionEffect")
 	cc.Name = "BA_Color"
-	cc.Saturation = 0.18
+	cc.Saturation = 0.2
 	cc.Contrast = 0.1
 	cc.Brightness = 0.02
+	cc.TintColor = Color3.fromRGB(255, 236, 214) -- leve tom dourado geral
 	cc.Parent = Lighting
 
 	local sun = Instance.new("SunRaysEffect")
 	sun.Name = "BA_Sun"
-	sun.Intensity = 0.12
-	sun.Spread = 0.6
+	sun.Intensity = 0.18
+	sun.Spread = 0.65
 	sun.Parent = Lighting
 
 	local sky = Instance.new("Sky")
