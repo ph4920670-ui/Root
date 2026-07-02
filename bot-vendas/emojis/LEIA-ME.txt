@@ -1,0 +1,13 @@
+Imagens dos emojis do bot. Ja vem com os 7 icones prontos:
+
+  home.png      lixeira.png   config.png   pessoas.png
+  carrinho.png  nuvem.png     seta.png
+
+No primeiro start o bot sobe esses arquivos como Application Emojis,
+que funcionam em QUALQUER servidor onde o bot esteja.
+
+Para TROCAR um icone:
+  1. troque o arquivo .png aqui (mesmo nome)
+  2. delete o Application Emoji antigo no Developer Portal
+     (sua aplicacao > Emojis)
+  3. reinicie o bot (ou rode /syncemojis)

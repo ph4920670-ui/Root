@@ -1,0 +1,35 @@
+# Bot de Vendas — como rodar no terminal
+
+## Pre-requisito (so uma vez)
+Ter o **Python 3.10 ou mais novo** instalado.
+- Windows: baixe em python.org e MARQUE "Add Python to PATH" na instalacao.
+- Linux/Mac: geralmente ja vem; senao `sudo apt install python3 python3-venv`.
+
+## Rodar
+
+### Windows
+Clique duas vezes em **run.bat**
+(ou abra o terminal na pasta e digite `run.bat`)
+
+### Linux / Mac
+Abra o terminal na pasta do bot e digite:
+
+    bash run.sh
+
+Pronto. O script faz tudo sozinho:
+  1. cria um ambiente isolado (.venv)
+  2. instala as dependencias (discord.py, aiohttp, python-dotenv)
+  3. inicia o bot
+
+Da primeira vez demora um pouco (baixando os pacotes). Depois e rapido.
+Para parar o bot: Ctrl+C.
+
+## Emojis personalizados (opcional)
+O bot funciona sem isso — usa emojis padrao do Discord como fallback.
+Para usar os seus: coloque os arquivos de imagem na pasta `emojis/`
+nomeados igual a chave (seta.gif, key.png, box.png...). Veja
+`emojis/LEIA-ME.txt`. O bot sobe tudo sozinho no primeiro start.
+
+## Configuracao
+As chaves (token do Discord, Supabase, MisticaPay) ficam no arquivo `.env`.
+O banco de dados precisa ter o `schema.sql` rodado no SQL Editor do Supabase.
