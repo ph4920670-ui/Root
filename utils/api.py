@@ -70,6 +70,12 @@ class SalasFFAPI:
                     return {"sucesso": False, "msg": "Sem conexão com a API."}
                 await self.close()
                 await asyncio.sleep(1.5)
+            except (aiohttp.ContentTypeError, ValueError):
+                # Resposta vazia ou HTML (ex: 502 do Cloudflare) em vez de JSON —
+                # instabilidade passageira da API, merece retry igual ao timeout.
+                if t == tentativas:
+                    return {"sucesso": False, "msg": "API instável (resposta inválida). Tente de novo em instantes."}
+                await asyncio.sleep(1.5)
             except Exception as e:
                 return {"sucesso": False, "msg": f"Erro: {e}"}
         return {"sucesso": False, "msg": "Falha na API."}
@@ -96,6 +102,10 @@ class SalasFFAPI:
                 if t == tentativas:
                     return {"sucesso": False, "msg": "Sem conexão com a API."}
                 await self.close()
+                await asyncio.sleep(1.5)
+            except (aiohttp.ContentTypeError, ValueError):
+                if t == tentativas:
+                    return {"sucesso": False, "msg": "API instável (resposta inválida). Tente de novo em instantes."}
                 await asyncio.sleep(1.5)
             except Exception as e:
                 return {"sucesso": False, "msg": f"Erro: {e}"}

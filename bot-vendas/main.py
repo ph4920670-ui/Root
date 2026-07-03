@@ -3313,24 +3313,42 @@ class SelAbrirTicket(discord.ui.Select):
 ATENDENTE_CMD = (os.environ.get('ATENDENTE_CMD', '') or '.iniciar').strip()
 
 
-async def _renovar_remoto(login_id=None, discord_id=None, dias=0):
+async def _renovar_remoto(login_id=None, discord_id=None, dias=0, _tentativas=3):
     """Chama /atendente/renovar no configadm pra somar os dias no vencimento do
-    cliente já existente. Retorna o dict de resposta ou None em erro."""
+    cliente já existente. Retorna o dict de resposta ou None em erro.
+
+    Tolerante a instabilidade: 5xx e resposta não-JSON (ex: página HTML de 502
+    do Cloudflare) entram em retry em vez de falhar na primeira tentativa."""
     if not CONFIGURADOR_URL:
         return None
     headers = {'X-Bot-Secret': BOT_FETCH_SECRET, 'Content-Type': 'application/json'}
     payload = {'login_id': login_id or '', 'discord_id': discord_id or '', 'dias': int(dias)}
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(f'{CONFIGURADOR_URL}/atendente/renovar', headers=headers,
-                             json=payload, timeout=aiohttp.ClientTimeout(total=20)) as r:
-                d = await r.json()
-                if r.status != 200 or not d.get('ok'):
-                    return {'_erro': (d or {}).get('msg', f'HTTP {r.status}')}
-                return d
-    except Exception as e:
-        print(f'[RENOVAR] erro: {e}', flush=True)
-        return None
+    for i in range(_tentativas):
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(f'{CONFIGURADOR_URL}/atendente/renovar', headers=headers,
+                                 json=payload, timeout=aiohttp.ClientTimeout(total=20)) as r:
+                    if r.status >= 500:
+                        txt = (await r.text())[:120]
+                        print(f'[RENOVAR] HTTP {r.status} (tentativa {i+1}): {txt!r}', flush=True)
+                        if i < _tentativas - 1:
+                            await asyncio.sleep(4)
+                            continue
+                        return None
+                    d = await r.json(content_type=None)
+                    if r.status != 200 or not (d or {}).get('ok'):
+                        return {'_erro': (d or {}).get('msg', f'HTTP {r.status}')}
+                    return d
+        except (aiohttp.ContentTypeError, ValueError) as e:
+            # resposta vazia/HTML em vez de JSON — instabilidade passageira
+            print(f'[RENOVAR] resposta inválida (tentativa {i+1}): {e}', flush=True)
+            if i < _tentativas - 1:
+                await asyncio.sleep(4)
+        except Exception as e:
+            print(f'[RENOVAR] erro (tentativa {i+1}): {type(e).__name__}: {e}', flush=True)
+            if i < _tentativas - 1:
+                await asyncio.sleep(4)
+    return None
 
 
 class RenovacaoModal(discord.ui.Modal, title='Renovação'):
