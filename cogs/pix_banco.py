@@ -440,10 +440,15 @@ class PixBancoView(discord.ui.View):
         return True
 
     # ── Linha 0: bancos ─────────────────────────────────────
-    # NOTA: os botões de Mercado Pago, PagBank, EFI Pay e MacroDroid foram
-    # ocultados temporariamente. O código deles (modais, lógica, persistência)
-    # continua intacto — pra reexibir basta restaurar os @discord.ui.button
-    # correspondentes e adicionar o banco em pc.BANCOS_VISIVEIS.
+    # NOTA: os botões de PagBank, EFI Pay e MacroDroid seguem ocultos.
+    # O código deles (modais, lógica, persistência) continua intacto — pra
+    # reexibir basta restaurar os @discord.ui.button correspondentes e
+    # adicionar o banco em pc.BANCOS_VISIVEIS.
+
+    @discord.ui.button(label="Mercado Pago", emoji="🔵", style=discord.ButtonStyle.primary, row=0, custom_id="pixpanel:btn_mp")
+    async def btn_mp(self, inter: discord.Interaction, btn):
+        if not await self._check_admin(inter): return
+        await inter.response.send_modal(MercadoPagoModal())
 
     @discord.ui.button(label="Gmail", emoji="📧", style=discord.ButtonStyle.primary, row=0, custom_id="pixpanel:btn_gmail")
     async def btn_gmail(self, inter: discord.Interaction, btn):
@@ -622,8 +627,12 @@ class TutorialView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=180)
 
-    # Tutoriais dos outros bancos foram ocultados temporariamente.
+    # Tutoriais de PagBank/EFI/MacroDroid seguem ocultos.
     # Pra reexibir, restaure os @discord.ui.button correspondentes.
+
+    @discord.ui.button(label="Mercado Pago", emoji="🔵", style=discord.ButtonStyle.secondary, row=0)
+    async def t_mp(self, inter, btn):
+        await inter.response.send_message(embed=_info("Tutorial — Mercado Pago", TUTORIAIS["mercadopago"]), ephemeral=True)
 
     @discord.ui.button(label="Gmail", emoji="📧", style=discord.ButtonStyle.secondary, row=0)
     async def t_gmail(self, inter, btn):

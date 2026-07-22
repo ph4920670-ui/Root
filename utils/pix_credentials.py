@@ -45,7 +45,7 @@ BANCOS = ("efi", "mercadopago", "pagbank", "macrodroid", "gmail")
 # Bancos que aparecem no painel /configurar_pix.
 # Os outros ficam ocultos (código permanece, só não exibimos no UI ainda).
 # Pra reativar: adicione na tupla.
-BANCOS_VISIVEIS = ("gmail",)
+BANCOS_VISIVEIS = ("mercadopago", "gmail")
 
 # Labels amigaveis
 BANCOS_LABEL = {
